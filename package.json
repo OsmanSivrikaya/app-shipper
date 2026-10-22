@@ -1,0 +1,9 @@
+{
+  "name": "app-shipper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tek komutla herhangi bir repodaki mobil uygulamayı TestFlight + Google Play'e gönderir",
+  "type": "module",
+  "bin": { "ship": "bin/ship.mjs" },
+  "engines": { "node": ">=20" }
+}

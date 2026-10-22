@@ -1,0 +1,99 @@
+require 'json'
+
+default_platform(:ios)
+
+platform :android do
+  desc 'AAB → Google Play'
+  lane :ship do
+    upload_to_play_store(
+      package_name: ENV.fetch('PACKAGE_NAME'),
+      aab: ENV.fetch('AAB'),
+      track: ENV['TRACK'].to_s.empty? ? 'internal' : ENV['TRACK'],
+      release_status: ENV['STATUS'].to_s.empty? ? 'completed' : ENV['STATUS'],
+      json_key_data: ENV.fetch('PLAY_SERVICE_ACCOUNT_JSON'),
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end
+
+platform :ios do
+  desc 'Imzala + archive + TestFlight'
+  lane :ship do
+    team_id = ENV.fetch('APPLE_TEAM_ID')
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch('ASC_KEY_ID'),
+      issuer_id: ENV.fetch('ASC_ISSUER_ID'),
+      key_content: ENV.fetch('ASC_PRIVATE_KEY')
+    )
+
+    targets = JSON.parse(ENV.fetch('IOS_TARGETS_JSON'))
+    main_bundle = ENV.fetch('IOS_BUNDLE_ID')
+
+    if Spaceship::ConnectAPI::App.find(main_bundle).nil?
+      UI.user_error!("App Store Connect'te '#{main_bundle}' uygulama kaydı yok. appstoreconnect.apple.com → Apps → + ile bir kez oluştur.")
+    end
+
+    # Geçici keychain + ortak Apple Distribution sertifikası
+    setup_ci(force: true)
+    import_certificate(
+      certificate_path: ENV.fetch('IOS_P12_PATH'),
+      certificate_password: ENV.fetch('IOS_DIST_CERT_PASSWORD'),
+      keychain_name: 'fastlane_tmp_keychain',
+      keychain_password: ''
+    )
+
+    profiles = {}
+    targets.each do |t|
+      bundle = t['bundle']
+      # Bundle ID Developer Portal'da yoksa oluştur (capability'ler bir kez portaldan açılmalı)
+      if Spaceship::ConnectAPI::BundleId.find(bundle).nil?
+        UI.important("Bundle ID oluşturuluyor: #{bundle}")
+        Spaceship::ConnectAPI::BundleId.create(name: bundle.tr('.', ' '), platform: 'IOS', identifier: bundle)
+      end
+      # Sertifikamıza uyan App Store profili yoksa sigh oluşturur
+      get_provisioning_profile(
+        api_key: api_key,
+        app_identifier: bundle,
+        team_id: team_id,
+        provisioning_name: "Shipper AppStore #{bundle}",
+        ignore_profiles_with_different_name: true
+      )
+      profiles[bundle] = lane_context[SharedValues::SIGH_NAME]
+
+      update_code_signing_settings(
+        path: ENV.fetch('IOS_PROJECT'),
+        targets: [t['target']],
+        use_automatic_signing: false,
+        team_id: team_id,
+        code_sign_identity: 'Apple Distribution',
+        profile_name: profiles[bundle],
+        bundle_identifier: bundle
+      )
+    end
+
+    xcargs = ["CURRENT_PROJECT_VERSION=#{ENV.fetch('BUILD_NUMBER')}"]
+    xcargs << "MARKETING_VERSION=#{ENV['VERSION']}" unless ENV['VERSION'].to_s.empty?
+
+    container = ENV['IOS_WORKSPACE'].to_s.empty? ? { project: ENV['IOS_PROJECT'] } : { workspace: ENV['IOS_WORKSPACE'] }
+    ipa = build_app(
+      **container,
+      scheme: ENV.fetch('IOS_SCHEME'),
+      configuration: 'Release',
+      export_method: 'app-store',
+      export_team_id: team_id,
+      export_options: { signingStyle: 'manual', provisioningProfiles: profiles, manageAppVersionAndBuildNumber: false },
+      xcargs: xcargs.join(' '),
+      output_directory: File.join(ENV.fetch('RUNNER_TEMP', '/tmp'), 'ipa'),
+      skip_profile_detection: true
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: ipa,
+      skip_waiting_for_build_processing: true
+    )
+  end
+end

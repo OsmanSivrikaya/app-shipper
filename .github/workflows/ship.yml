@@ -1,0 +1,194 @@
+name: Ship
+run-name: "🚀 ${{ inputs.repo }}@${{ inputs.ref || 'default' }} → ${{ inputs.platforms }}"
+
+# Tetikleyenler: `ship <repo>` CLI'ı  veya  proje reposundaki ship-on-tag.yml (v* tag push)
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: owner/repo
+        required: true
+        type: string
+      ref:
+        description: branch / tag / sha (boş = default branch)
+        type: string
+        default: ""
+      platforms:
+        type: choice
+        options: [both, ios, android]
+        default: both
+      app_path:
+        description: Repo içindeki uygulama klasörü (boş = otomatik bul)
+        type: string
+        default: ""
+      version:
+        description: Görünen sürüm, ör. 1.2.0 (boş = projede yazan)
+        type: string
+        default: ""
+      android_track:
+        type: string
+        default: internal
+      android_status:
+        type: choice
+        options: [completed, draft]
+        default: completed
+
+concurrency:
+  group: ship-${{ inputs.repo }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      app_dir: ${{ steps.d.outputs.app_dir }}
+      type: ${{ steps.d.outputs.type }}
+      pm: ${{ steps.d.outputs.pm }}
+      node_version: ${{ steps.d.outputs.node_version }}
+      java_version: ${{ steps.d.outputs.java_version }}
+      android_dir: ${{ steps.d.outputs.android_dir }}
+      ios_dir: ${{ steps.d.outputs.ios_dir }}
+      has_android: ${{ steps.d.outputs.has_android }}
+      has_ios: ${{ steps.d.outputs.has_ios }}
+      ios_scheme: ${{ steps.d.outputs.ios_scheme }}
+      android_task: ${{ steps.d.outputs.android_task }}
+      prepare_cmd: ${{ steps.d.outputs.prepare_cmd }}
+      build_number: ${{ steps.d.outputs.build_number }}
+      slug: ${{ steps.d.outputs.slug }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: shipper }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          path: app
+      - id: d
+        env:
+          REPO: ${{ inputs.repo }}
+        run: bash shipper/scripts/detect.sh app "${{ inputs.app_path }}"
+
+  android:
+    name: Android → Google Play
+    needs: detect
+    if: inputs.platforms != 'ios' && needs.detect.outputs.has_android == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SHIPPER: ${{ github.workspace }}/shipper
+      TYPE: ${{ needs.detect.outputs.type }}
+      PM: ${{ needs.detect.outputs.pm }}
+      SLUG: ${{ needs.detect.outputs.slug }}
+      APP_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}
+      ANDROID_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}/${{ needs.detect.outputs.android_dir }}
+      PREPARE_CMD: ${{ needs.detect.outputs.prepare_cmd }}
+      GRADLE_TASK: ${{ needs.detect.outputs.android_task }}
+      BUILD_NUMBER: ${{ needs.detect.outputs.build_number }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: shipper }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          path: app
+          submodules: recursive
+          lfs: true
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.node_version != ''
+        with: { node-version: "${{ needs.detect.outputs.node_version }}" }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "${{ needs.detect.outputs.java_version }}" }
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: subosito/flutter-action@v2
+        if: needs.detect.outputs.type == 'flutter'
+        with: { channel: stable, cache: true }
+      - uses: ruby/setup-ruby@v1
+        with: { ruby-version: "3.3", bundler-cache: true, working-directory: shipper }
+
+      - name: Prepare (${{ needs.detect.outputs.type }})
+        env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
+        run: bash "$SHIPPER/scripts/prepare.sh" android
+
+      - name: Signing + version
+        env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
+        run: bash "$SHIPPER/scripts/android-signing.sh"
+
+      - name: Build AAB
+        run: bash "$SHIPPER/scripts/android-build.sh"
+
+      - name: Upload to Google Play
+        working-directory: shipper
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ inputs.android_track }}
+          STATUS: ${{ inputs.android_status }}
+        run: bundle exec fastlane android ship
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-aab
+          path: ${{ env.AAB }}
+          if-no-files-found: ignore
+
+  ios:
+    name: iOS → TestFlight
+    needs: detect
+    if: inputs.platforms != 'android' && needs.detect.outputs.has_ios == 'true'
+    runs-on: macos-latest
+    env:
+      SHIPPER: ${{ github.workspace }}/shipper
+      TYPE: ${{ needs.detect.outputs.type }}
+      PM: ${{ needs.detect.outputs.pm }}
+      SLUG: ${{ needs.detect.outputs.slug }}
+      APP_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}
+      IOS_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}/${{ needs.detect.outputs.ios_dir }}
+      IOS_SCHEME: ${{ needs.detect.outputs.ios_scheme }}
+      PREPARE_CMD: ${{ needs.detect.outputs.prepare_cmd }}
+      BUILD_NUMBER: ${{ needs.detect.outputs.build_number }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: shipper }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          path: app
+          submodules: recursive
+          lfs: true
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: latest-stable }
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.node_version != ''
+        with: { node-version: "${{ needs.detect.outputs.node_version }}" }
+      - uses: subosito/flutter-action@v2
+        if: needs.detect.outputs.type == 'flutter'
+        with: { channel: stable, cache: true }
+      - uses: ruby/setup-ruby@v1
+        with: { ruby-version: "3.3", bundler-cache: true, working-directory: shipper }
+
+      - name: Prepare (${{ needs.detect.outputs.type }})
+        env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
+        run: bash "$SHIPPER/scripts/prepare.sh" ios
+
+      - name: Detect Xcode project
+        run: bash "$SHIPPER/scripts/ios-detect.sh"
+
+      - name: Sign, build & upload to TestFlight
+        working-directory: shipper
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+        run: |
+          export IOS_P12_PATH="$RUNNER_TEMP/dist.p12"
+          echo "$IOS_DIST_CERT_P12_BASE64" | base64 --decode > "$IOS_P12_PATH"
+          bundle exec fastlane ios ship
