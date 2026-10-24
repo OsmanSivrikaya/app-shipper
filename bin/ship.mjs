@@ -24,7 +24,14 @@ const HOME_DIR = path.join(os.homedir(), '.app-shipper')
 const CONFIG_PATH = path.join(HOME_DIR, 'config.json')
 
 // ─────────────────────── helpers ───────────────────────
-const c = { g: (s) => `\x1b[32m${s}\x1b[0m`, y: (s) => `\x1b[33m${s}\x1b[0m`, r: (s) => `\x1b[31m${s}\x1b[0m`, b: (s) => `\x1b[1m${s}\x1b[0m` }
+const c = {
+  g: (s) => `\x1b[32m${s}\x1b[0m`,
+  y: (s) => `\x1b[33m${s}\x1b[0m`,
+  r: (s) => `\x1b[31m${s}\x1b[0m`,
+  b: (s) => `\x1b[1m${s}\x1b[0m`,
+  c: (s) => `\x1b[36m${s}\x1b[0m`,
+  dim: (s) => `\x1b[2m${s}\x1b[0m`,
+}
 const die = (msg) => { console.error(c.r(`✖ ${msg}`)); process.exit(1) }
 
 function gh(args, opts = {}) {
@@ -109,14 +116,102 @@ async function ship(pos, flags) {
   console.log(`   ${run.url}`)
   if (flags.watch === false) return
 
-  const r = spawnSync('gh', ['run', 'watch', String(run.databaseId), '-R', shipper, '--exit-status', '--interval', '15'], { stdio: 'inherit' })
-  if (r.status === 0) {
-    console.log(c.g(`\n✔ Gönderildi! ${platforms !== 'android' ? 'TestFlight (işlenmesi ~5-15 dk) ' : ''}${platforms !== 'ios' ? `Google Play (${fields.android_track})` : ''}`))
-  } else {
-    console.log(c.r('\n✖ Başarısız. Hata logu:'))
-    spawnSync('gh', ['run', 'view', String(run.databaseId), '-R', shipper, '--log-failed'], { stdio: 'inherit' })
-    process.exit(1)
+  const code = await watchWorkflow(run.databaseId, shipper, platforms, fields)
+  if (code !== 0) process.exit(code)
+}
+
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+const formatDuration = (sec) => `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`
+
+async function watchWorkflow(runId, shipper, platforms, fields) {
+  process.stdout.write('\x1b[?25l')
+  const restoreCursor = () => process.stdout.write('\x1b[?25h')
+  process.on('SIGINT', () => { restoreCursor(); process.exit(130) })
+  process.on('exit', restoreCursor)
+
+  const startTime = Date.now()
+  let spinIdx = 0
+  let lastData = null
+  let lastFetch = 0
+  let isFetching = false
+  let lastLineCount = 0
+
+  async function fetchStatus() {
+    if (isFetching) return
+    isFetching = true
+    try {
+      const out = gh(['run', 'view', String(runId), '-R', shipper, '--json', 'status,conclusion,jobs'])
+      lastData = JSON.parse(out)
+    } catch { /* ağ hatası */ }
+    finally { isFetching = false }
   }
+
+  await fetchStatus()
+
+  return new Promise((resolve) => {
+    const timer = setInterval(async () => {
+      spinIdx = (spinIdx + 1) % SPINNER.length
+      const now = Date.now()
+      if (now - lastFetch > 2500) {
+        lastFetch = now
+        fetchStatus()
+      }
+
+      const elapsed = Math.floor((now - startTime) / 1000)
+      const spinner = c.c(SPINNER[spinIdx])
+
+      const lines = []
+      lines.push(`${c.b('Durum')} ${c.dim(`[${formatDuration(elapsed)}]`)}`)
+
+      const jobs = lastData?.jobs || []
+      for (const j of jobs) {
+        let icon = c.dim('○')
+        let extra = ''
+        if (j.status === 'completed') {
+          if (j.conclusion === 'success') icon = c.g('✔')
+          else if (j.conclusion === 'cancelled') icon = c.y('⊘')
+          else icon = c.r('✖')
+        } else if (j.status === 'in_progress') {
+          icon = spinner
+          const activeStep = j.steps?.find((s) => s.status === 'in_progress')
+          if (activeStep) extra = c.dim(` → ${activeStep.name}`)
+        }
+        lines.push(`  ${icon} ${j.name}${extra}`)
+      }
+
+      if (lastLineCount > 0) {
+        process.stdout.write(`\x1b[${lastLineCount}A`)
+      }
+      for (const line of lines) {
+        process.stdout.write(`\x1b[2K${line}\n`)
+      }
+      lastLineCount = lines.length
+
+      if (lastData && lastData.status === 'completed') {
+        clearInterval(timer)
+        restoreCursor()
+        console.log('')
+        const success = lastData.conclusion === 'success'
+        const iosJob = jobs.find((j) => j.name.includes('iOS'))
+        const androidJob = jobs.find((j) => j.name.includes('Android'))
+
+        if (iosJob?.conclusion === 'success') {
+          console.log(c.g('✔ iOS: TestFlight yüklemesi tamamlandı! (Apple tarafından işlenmesi ~5-15 dk sürer)'))
+        }
+        if (androidJob?.conclusion === 'success') {
+          console.log(c.g(`✔ Android: Google Play (${fields.android_track}) yüklemesi tamamlandı!`))
+        }
+
+        if (success) {
+          resolve(0)
+        } else {
+          console.log(c.r('✖ Bazı adımlar tamamlanamadı. Hata detayı:'))
+          spawnSync('gh', ['run', 'view', String(runId), '-R', shipper, '--log-failed'], { stdio: 'inherit' })
+          resolve(1)
+        }
+      }
+    }, 100)
+  })
 }
 
 // ─────────────────────── ship init <repo> ───────────────────────
