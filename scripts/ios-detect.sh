@@ -24,6 +24,9 @@ fi
 [ -z "$SCHEME" ] && { echo "::error::Scheme bulunamadı (ship.json → ios.scheme)"; exit 1; }
 
 SETTINGS="$(xcodebuild -showBuildSettings -json "${CONTAINER[@]}" "${SPM[@]}" -scheme "$SCHEME" -configuration Release -destination 'generic/platform=iOS' 2>/dev/null)"
+# Scheme yalnız ana target'ı listeleyebilir (Expo); gömülü extension'lar (widget, share…) projenin tüm target'larından
+ALL="$(xcodebuild -showBuildSettings -json -project "$PROJ" "${SPM[@]}" -alltargets -configuration Release 2>/dev/null || echo '[]')"
+SETTINGS="$(jq -s 'add' <<<"$SETTINGS$ALL")"
 # İmzalanacak target'lar: .app + .appex (widget, notification extension…)
 TARGETS="$(jq -c '[.[] | .buildSettings | select(.WRAPPER_EXTENSION == "app" or .WRAPPER_EXTENSION == "appex")
   | select(.PRODUCT_BUNDLE_IDENTIFIER != null) | {target: .TARGET_NAME, bundle: .PRODUCT_BUNDLE_IDENTIFIER, plist: (.INFOPLIST_FILE // ""), main: (.WRAPPER_EXTENSION == "app")}]
