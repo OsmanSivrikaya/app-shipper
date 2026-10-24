@@ -25,6 +25,8 @@ android.injected.signing.store.password=$STORE_PASS
 android.injected.signing.key.alias=$KEY_ALIAS
 android.injected.signing.key.password=$KEY_PASS
 org.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC
+org.gradle.parallel=true
+org.gradle.caching=true
 EOF
 
 # versionCode her build'de artar; versionName sadece --version verilirse değişir

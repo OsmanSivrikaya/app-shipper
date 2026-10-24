@@ -5,6 +5,7 @@ default_platform(:ios)
 platform :android do
   desc 'AAB → Google Play'
   lane :ship do
+    UI.user_error!("PLAY_SERVICE_ACCOUNT_JSON boş. `ship play <anahtar.json>` ile yükle (README → Google Play).") if ENV['PLAY_SERVICE_ACCOUNT_JSON'].to_s.strip.empty?
     upload_to_play_store(
       package_name: ENV.fetch('PACKAGE_NAME'),
       aab: ENV.fetch('AAB'),
@@ -78,6 +79,7 @@ platform :ios do
     xcargs << "MARKETING_VERSION=#{ENV['VERSION']}" unless ENV['VERSION'].to_s.empty?
 
     container = ENV['IOS_WORKSPACE'].to_s.empty? ? { project: ENV['IOS_PROJECT'] } : { workspace: ENV['IOS_WORKSPACE'] }
+    container[:cloned_source_packages_path] = ENV['IOS_SPM_DIR'] unless ENV['IOS_SPM_DIR'].to_s.empty?
     ipa = build_app(
       **container,
       scheme: ENV.fetch('IOS_SCHEME'),

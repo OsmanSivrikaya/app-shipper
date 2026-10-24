@@ -10,17 +10,20 @@ if [ -z "$PROJ" ]; then echo "::error::$IOS_DIR içinde .xcodeproj yok"; exit 1;
 PROJ="$(pwd)/${PROJ#./}"
 [ -n "$WS" ] && WS="$(pwd)/${WS#./}"
 if [ -n "$WS" ]; then CONTAINER=(-workspace "$WS"); else CONTAINER=(-project "$PROJ"); fi
+# SwiftPM paketleri her koşuda baştan indirilmesin: önbellekli ortak klasör (workflow'daki cache adımı)
+SPM=()
+if [ -n "${IOS_SPM_DIR:-}" ]; then mkdir -p "$IOS_SPM_DIR"; SPM=(-clonedSourcePackagesDirPath "$IOS_SPM_DIR"); fi
 
 SCHEME="${IOS_SCHEME:-}"
 if [ -z "$SCHEME" ]; then
-  LIST="$(xcodebuild -list -json "${CONTAINER[@]}" 2>/dev/null)"
+  LIST="$(xcodebuild -list -json "${CONTAINER[@]}" "${SPM[@]}" 2>/dev/null)"
   BASE="$(basename "$PROJ" .xcodeproj)"
   # Önce .xcodeproj adıyla aynı scheme, yoksa Pods olmayan ilk scheme
   SCHEME="$(jq -r --arg b "$BASE" '(.workspace.schemes // .project.schemes) | (map(select(. == $b)) + map(select(test("^Pods") | not))) | .[0] // empty' <<<"$LIST")"
 fi
 [ -z "$SCHEME" ] && { echo "::error::Scheme bulunamadı (ship.json → ios.scheme)"; exit 1; }
 
-SETTINGS="$(xcodebuild -showBuildSettings -json "${CONTAINER[@]}" -scheme "$SCHEME" -configuration Release -destination 'generic/platform=iOS' 2>/dev/null)"
+SETTINGS="$(xcodebuild -showBuildSettings -json "${CONTAINER[@]}" "${SPM[@]}" -scheme "$SCHEME" -configuration Release -destination 'generic/platform=iOS' 2>/dev/null)"
 # İmzalanacak target'lar: .app + .appex (widget, notification extension…)
 TARGETS="$(jq -c '[.[] | .buildSettings | select(.WRAPPER_EXTENSION == "app" or .WRAPPER_EXTENSION == "appex")
   | select(.PRODUCT_BUNDLE_IDENTIFIER != null) | {target: .TARGET_NAME, bundle: .PRODUCT_BUNDLE_IDENTIFIER, plist: (.INFOPLIST_FILE // ""), main: (.WRAPPER_EXTENSION == "app")}]

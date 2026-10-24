@@ -55,6 +55,7 @@ jobs:
       prepare_cmd: ${{ steps.d.outputs.prepare_cmd }}
       build_number: ${{ steps.d.outputs.build_number }}
       slug: ${{ steps.d.outputs.slug }}
+      npm_lock: ${{ steps.d.outputs.npm_lock }}
     steps:
       - uses: actions/checkout@v4
         with: { path: shipper }
@@ -86,6 +87,17 @@ jobs:
       BUILD_NUMBER: ${{ needs.detect.outputs.build_number }}
       VERSION: ${{ inputs.version }}
     steps:
+      - name: Gizli anahtarlar tam mı? (build'den ÖNCE kontrol)
+        env:
+          PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_APP: ${{ secrets[format('ANDROID_KEYSTORE_BASE64_{0}', needs.detect.outputs.slug)] }}
+        run: |
+          fail=0
+          if [ -z "$PLAY" ]; then echo "::error::PLAY_SERVICE_ACCOUNT_JSON secret'ı yok → terminalde: ship play <service-account.json>"; fail=1
+          elif ! jq -e '.client_email and .private_key' >/dev/null 2>&1 <<<"$PLAY"; then echo "::error::PLAY_SERVICE_ACCOUNT_JSON geçerli bir service account anahtarı değil (client_email/private_key yok) → ship play <doğru-dosya.json>"; fail=1; fi
+          if [ -z "$KS$KS_APP" ]; then echo "::error::Android keystore secret'ı yok → ship setup"; fail=1; fi
+          exit $fail
       - uses: actions/checkout@v4
         with: { path: shipper }
       - uses: actions/checkout@v4
@@ -98,7 +110,10 @@ jobs:
           lfs: true
       - uses: actions/setup-node@v4
         if: needs.detect.outputs.node_version != ''
-        with: { node-version: "${{ needs.detect.outputs.node_version }}" }
+        with:
+          node-version: "${{ needs.detect.outputs.node_version }}"
+          cache: ${{ needs.detect.outputs.npm_lock != '' && 'npm' || '' }}
+          cache-dependency-path: ${{ needs.detect.outputs.npm_lock }}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "${{ needs.detect.outputs.java_version }}" }
       - uses: gradle/actions/setup-gradle@v4
@@ -165,12 +180,25 @@ jobs:
         with: { xcode-version: latest-stable }
       - uses: actions/setup-node@v4
         if: needs.detect.outputs.node_version != ''
-        with: { node-version: "${{ needs.detect.outputs.node_version }}" }
+        with:
+          node-version: "${{ needs.detect.outputs.node_version }}"
+          cache: ${{ needs.detect.outputs.npm_lock != '' && 'npm' || '' }}
+          cache-dependency-path: ${{ needs.detect.outputs.npm_lock }}
       - uses: subosito/flutter-action@v2
         if: needs.detect.outputs.type == 'flutter'
         with: { channel: stable, cache: true }
       - uses: ruby/setup-ruby@v1
         with: { ruby-version: "3.3", bundler-cache: true, working-directory: shipper }
+
+      # SwiftPM paketleri (Capacitor eklentileri vb.) her seferinde baştan indirilmesin
+      - name: SwiftPM önbelleği
+        uses: actions/cache@v4
+        with:
+          path: ~/spm-cache
+          key: spm-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-${{ inputs.repo }}-
+      - name: SwiftPM klasörünü ayarla
+        run: echo "IOS_SPM_DIR=$HOME/spm-cache" >> "$GITHUB_ENV"
 
       - name: Prepare (${{ needs.detect.outputs.type }})
         env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }

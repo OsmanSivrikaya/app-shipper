@@ -88,8 +88,12 @@ if [ -f "$WRAPPER" ]; then
   if [ "${GMAJ:-0}" -gt 8 ] 2>/dev/null || { [ "${GMAJ:-0}" -eq 8 ] && [ "${GMIN:-0}" -ge 5 ]; } 2>/dev/null; then JAVA=21; fi
 fi
 
-# Her çalıştırmada artan build numarası (2020'den beri geçen dakika) → hiçbir projede elle artırmak gerekmez
-BUILD_NUMBER=$(( ($(date -u +%s) - 1577836800) / 60 ))
+# Her çalıştırmada artan build numarası → hiçbir projede elle artırmak gerekmez.
+# Biçim YYDDDHHMM (UTC): yıl(2) + yılın günü(3) + saat/dakika(4). Örn. 262971512 = 2026, 297. gün, 15:12.
+# Hem Play versionCode (≤ 2.1 milyar) hem iOS build sınırına sığar, her yıl/dakika kesin artar, okunaklıdır.
+BUILD_NUMBER=$(( 10#$(date -u +%y%j%H%M) ))
+# npm önbelleği yalnız package-lock.json varsa (setup-node yoksa hata verir)
+NPM_LOCK=""; [ "$PM" = npm ] && [ -f package-lock.json ] && NPM_LOCK="app/$APP_DIR/package-lock.json"
 SLUG="$(echo "${REPO:-app}" | sed 's#.*/##' | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]/_/g')"
 
 {
@@ -107,4 +111,5 @@ SLUG="$(echo "${REPO:-app}" | sed 's#.*/##' | tr '[:lower:]' '[:upper:]' | sed '
   echo "prepare_cmd=$(cfg .prepare)"
   echo "build_number=$BUILD_NUMBER"
   echo "slug=$SLUG"
+  echo "npm_lock=$NPM_LOCK"
 } | tee -a "${GITHUB_OUTPUT:-/dev/null}"

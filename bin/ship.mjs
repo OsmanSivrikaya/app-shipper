@@ -9,6 +9,8 @@
 //   ship keystore tahmin-et --jks C:\x.jks --alias upload --store-pass *** [--key-pass ***]
 //   ship env tahmin-et .env.production   → build sırasında .env olarak yazılır
 //   ship setup                   → tek seferlik: hesap bilgileri → GitHub secret'ları
+//   ship play <anahtar.json>     → Google Play service account anahtarını (tek başına) yükler
+//   ship doctor                  → eksik secret var mı? (gönderimden önce kontrol)
 //   ship status                  → son gönderimler
 
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -271,6 +273,39 @@ function env(pos) {
   console.log(c.g(`✔ ${repo}: build sırasında ${pos[1]} içeriği .env olarak yazılacak`))
 }
 
+// Google Play service account anahtarını doğrulayıp secret olarak yükler (setup'ı baştan çalıştırmadan)
+function play(pos) {
+  if (!pos[0]) die('ship play <service-account.json>   (Play Console → Kurulum → API erişimi → servis hesabı → Anahtar ekle → JSON)')
+  const raw = fs.readFileSync(pos[0], 'utf8')
+  let j
+  try { j = JSON.parse(raw) } catch { die('Dosya geçerli JSON değil') }
+  if (!j.client_email || !j.private_key) die('Bu bir service account anahtarı değil (client_email / private_key yok)')
+  setSecret(shipperRepo(), 'PLAY_SERVICE_ACCOUNT_JSON', raw)
+  console.log(c.g(`✔ PLAY_SERVICE_ACCOUNT_JSON yüklendi (${j.client_email})`))
+  console.log(c.y('  Bu e-posta Play Console → Kullanıcılar ve izinler\'de "Sürümleri yönet" yetkisiyle ekli olmalı.'))
+}
+
+// Gerekli secret'ların hepsi var mı?
+function doctor() {
+  const shipper = shipperRepo()
+  const have = new Set(JSON.parse(gh(['secret', 'list', '-R', shipper, '--json', 'name'])).map((x) => x.name))
+  const groups = {
+    'Kaynak repo erişimi': ['SOURCE_TOKEN'],
+    iOS: ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_PRIVATE_KEY', 'APPLE_TEAM_ID', 'IOS_DIST_CERT_P12_BASE64', 'IOS_DIST_CERT_PASSWORD'],
+    'Android imza': ['ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD'],
+    'Google Play': ['PLAY_SERVICE_ACCOUNT_JSON'],
+  }
+  let missing = 0
+  for (const [name, keys] of Object.entries(groups)) {
+    const lack = keys.filter((k) => !have.has(k))
+    missing += lack.length
+    console.log(`${lack.length ? c.r('✖') : c.g('✔')} ${name}${lack.length ? '  → eksik: ' + lack.join(', ') : ''}`)
+  }
+  if (have.has('PLAY_SERVICE_ACCOUNT_JSON') === false) console.log(c.y('\nGoogle Play için:  ship play <service-account.json>'))
+  if (missing) process.exit(1)
+  console.log(c.g('\nHer şey tamam: ship'))
+}
+
 function status() {
   spawnSync('gh', ['run', 'list', '-R', shipperRepo(), '-w', 'ship.yml', '-L', '15'], { stdio: 'inherit' })
 }
@@ -374,6 +409,7 @@ async function setup(flags) {
   // 3) Google Play
   console.log(c.b('\n— Google Play —') + '  Service account JSON (Play Console → Users and permissions\'ta yetkili olmalı)')
   const playJson = await ask('play-json', 'Service account JSON dosya yolu')
+  try { const j = JSON.parse(fs.readFileSync(playJson, 'utf8')); if (!j.client_email || !j.private_key) throw new Error('x') } catch { die('Play service account JSON geçersiz (client_email/private_key yok). Doğru anahtar dosyasıyla tekrar: ship setup') }
   const ks = sharedKeystore()
 
   // 4) GitHub token (özel repoları okumak + tag'den tetiklemek için)
@@ -405,6 +441,8 @@ try {
   else if (cmd === 'keystore') keystore(pos.slice(1), flags)
   else if (cmd === 'env') env(pos.slice(1))
   else if (cmd === 'status') status()
+  else if (cmd === 'play') play(pos.slice(1))
+  else if (cmd === 'doctor') doctor()
   else if (cmd === 'help' || flags.help) console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 12).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
   else await ship(pos, flags)
 } catch (e) {
