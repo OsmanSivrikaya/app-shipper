@@ -125,12 +125,68 @@ async function ship(pos, flags) {
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const formatDuration = (sec) => `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`
 
+// ── geçmiş süreler: ilerleme yüzdesi ve kalan süre tahmini için (~/.app-shipper/history.json) ──
+const HISTORY_PATH = path.join(HOME_DIR, 'history.json')
+const DEFAULT_TOTAL = { Android: 190, iOS: 330 } // geçmiş yokken kaba tahmin (sn)
+const jobKey = (name) => (name.includes('iOS') ? 'iOS' : name.includes('Android') ? 'Android' : name)
+const loadHistory = () => { try { return JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8')) } catch { return {} } }
+const secs = (a, b) => Math.max(0, (Date.parse(b) - Date.parse(a)) / 1000)
+const avg = (arr) => arr.reduce((x, y) => x + y, 0) / arr.length
+const HIDDEN_STEP = /^(Set up job|Complete job|Post )/
+const prettyStep = (n) => n.replace(/^Run /, '').replace(/@v\d+$/, '')
+
+function saveHistory(jobs) {
+  const h = loadHistory()
+  for (const j of jobs) {
+    if (j.conclusion !== 'success') continue
+    const k = jobKey(j.name)
+    h[k] ??= {}
+    for (const st of j.steps || []) {
+      if (st.conclusion !== 'success' || !st.startedAt || !st.completedAt) continue
+      h[k][st.name] = [...(h[k][st.name] || []), secs(st.startedAt, st.completedAt)].slice(-5)
+    }
+  }
+  try { fs.mkdirSync(HOME_DIR, { recursive: true }); fs.writeFileSync(HISTORY_PATH, JSON.stringify(h)) } catch { /* yazılamadı: önemli değil */ }
+}
+
+// Bir job için { pct, remaining(sn), est: adım → tahmini sn }
+function estimate(job, hist, now) {
+  const key = jobKey(job.name)
+  const known = hist[key] || {}
+  const jobElapsed = job.startedAt ? (now - Date.parse(job.startedAt)) / 1000 : 0
+  const steps = (job.steps || []).filter((st) => st.conclusion !== 'skipped')
+  const est = {}
+  let have = 0
+  for (const st of steps) {
+    if (known[st.name]?.length) { est[st.name] = avg(known[st.name]); have++ } else est[st.name] = 2
+  }
+  if (job.status === 'completed') return { pct: 100, remaining: 0, est }
+  if (!have) {
+    const total = DEFAULT_TOTAL[key] || 240
+    return { pct: Math.min(95, Math.round((jobElapsed / total) * 100)), remaining: Math.max(15, total - jobElapsed), est }
+  }
+  let total = 0
+  let done = 0
+  for (const st of steps) {
+    total += est[st.name]
+    if (st.status === 'completed') done += est[st.name]
+    else if (st.status === 'in_progress') done += Math.min((now - Date.parse(st.startedAt)) / 1000, est[st.name] * 0.95)
+  }
+  return { pct: Math.min(99, Math.round((done / total) * 100)), remaining: Math.max(3, total - done), est }
+}
+
+const bar = (pct, w = 20) => {
+  const f = Math.round((pct / 100) * w)
+  return c.g('█'.repeat(f)) + c.dim('░'.repeat(w - f))
+}
+
 async function watchWorkflow(runId, shipper, platforms, fields) {
   process.stdout.write('\x1b[?25l')
   const restoreCursor = () => process.stdout.write('\x1b[?25h')
   process.on('SIGINT', () => { restoreCursor(); process.exit(130) })
   process.on('exit', restoreCursor)
 
+  const hist = loadHistory()
   const startTime = Date.now()
   let spinIdx = 0
   let lastData = null
@@ -161,37 +217,61 @@ async function watchWorkflow(runId, shipper, platforms, fields) {
 
       const elapsed = Math.floor((now - startTime) / 1000)
       const spinner = c.c(SPINNER[spinIdx])
+      const jobs = lastData?.jobs || []
 
       const lines = []
-      lines.push(`${c.b('Durum')} ${c.dim(`[${formatDuration(elapsed)}]`)}`)
+      const est = jobs.filter((j) => j.name !== 'detect').map((j) => ({ j, e: estimate(j, hist, now) }))
+      const left = Math.round(Math.max(0, ...est.filter(({ j }) => j.status !== 'completed').map(({ e }) => e.remaining)))
+      lines.push(`${c.b('Durum')} ${c.dim(`[${formatDuration(elapsed)}]`)}${left ? c.dim(`  ·  tahmini kalan ~${formatDuration(left)}`) : ''}`)
 
-      const jobs = lastData?.jobs || []
       for (const j of jobs) {
+        const e = estimate(j, hist, now)
+        const running = j.status === 'in_progress'
         let icon = c.dim('○')
-        let extra = ''
         if (j.status === 'completed') {
           if (j.conclusion === 'success') icon = c.g('✔')
-          else if (j.conclusion === 'cancelled') icon = c.y('⊘')
+          else if (j.conclusion === 'cancelled' || j.conclusion === 'skipped') icon = c.y('⊘')
           else icon = c.r('✖')
-        } else if (j.status === 'in_progress') {
-          icon = spinner
-          const activeStep = j.steps?.find((s) => s.status === 'in_progress')
-          if (activeStep) extra = c.dim(` → ${activeStep.name}`)
+        } else if (running) icon = spinner
+
+        if (j.name === 'detect' || !running) {
+          const dur = j.startedAt && j.completedAt ? c.dim(`  ${formatDuration(Math.round(secs(j.startedAt, j.completedAt)))}`) : ''
+          lines.push(`  ${icon} ${j.name}${dur}`)
+          continue
         }
-        lines.push(`  ${icon} ${j.name}${extra}`)
+        // çalışan job: yüzde, kalan süre ve adım listesi (biten / şu an / kalan)
+        lines.push(`  ${icon} ${c.b(j.name)}  ${bar(e.pct)} ${String(e.pct).padStart(3)}%  ${c.dim(`~${formatDuration(Math.round(e.remaining))} kaldı`)}`)
+        for (const st of j.steps || []) {
+          if (st.conclusion === 'skipped' || HIDDEN_STEP.test(st.name)) continue
+          const name = prettyStep(st.name)
+          if (st.status === 'completed') {
+            const d = st.startedAt && st.completedAt ? secs(st.startedAt, st.completedAt) : 0
+            if (d >= 3 || st.conclusion === 'failure') lines.push(`      ${st.conclusion === 'failure' ? c.r('✖') : c.g('✔')} ${c.dim(name)} ${c.dim(formatDuration(Math.round(d)))}`)
+          } else if (st.status === 'in_progress') {
+            const d = Math.round((now - Date.parse(st.startedAt)) / 1000)
+            const t = Math.round(e.est[st.name] || 0)
+            lines.push(`      ${spinner} ${name} ${c.dim(`${formatDuration(d)}${t > 3 ? ` / ~${formatDuration(t)}` : ''}`)}`)
+          } else {
+            const t = Math.round(e.est[st.name] || 0)
+            lines.push(`      ${c.dim('○')} ${c.dim(name)}${t > 3 ? c.dim(` ~${formatDuration(t)}`) : ''}`)
+          }
+        }
       }
 
-      if (lastLineCount > 0) {
-        process.stdout.write(`\x1b[${lastLineCount}A`)
-      }
-      for (const line of lines) {
-        process.stdout.write(`\x1b[2K${line}\n`)
+      if (lastLineCount > 0) process.stdout.write(`\x1b[${lastLineCount}A`)
+      for (const line of lines) process.stdout.write(`\x1b[2K${line}\n`)
+      // önceki karede daha çok satır varsa artıkları temizle
+      const extra = lastLineCount - lines.length
+      if (extra > 0) {
+        for (let i = 0; i < extra; i++) process.stdout.write('\x1b[2K\n')
+        process.stdout.write(`\x1b[${extra}A`)
       }
       lastLineCount = lines.length
 
       if (lastData && lastData.status === 'completed') {
         clearInterval(timer)
         restoreCursor()
+        saveHistory(jobs)
         console.log('')
         const success = lastData.conclusion === 'success'
         const iosJob = jobs.find((j) => j.name.includes('iOS'))

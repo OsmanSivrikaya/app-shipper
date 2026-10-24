@@ -75,11 +75,12 @@ platform :ios do
       )
     end
 
-    xcargs = ["CURRENT_PROJECT_VERSION=#{ENV.fetch('BUILD_NUMBER')}"]
+    xcargs = ["CURRENT_PROJECT_VERSION=#{ENV.fetch('BUILD_NUMBER')}", 'COMPILER_INDEX_STORE_ENABLE=NO']
     xcargs << "MARKETING_VERSION=#{ENV['VERSION']}" unless ENV['VERSION'].to_s.empty?
 
     container = ENV['IOS_WORKSPACE'].to_s.empty? ? { project: ENV['IOS_PROJECT'] } : { workspace: ENV['IOS_WORKSPACE'] }
     container[:cloned_source_packages_path] = ENV['IOS_SPM_DIR'] unless ENV['IOS_SPM_DIR'].to_s.empty?
+    container[:derived_data_path] = ENV['IOS_DERIVED_DIR'] unless ENV['IOS_DERIVED_DIR'].to_s.empty?
     ipa = build_app(
       **container,
       scheme: ENV.fetch('IOS_SCHEME'),

@@ -134,7 +134,7 @@ jobs:
       - name: Build AAB
         run: bash "$SHIPPER/scripts/android-build.sh"
 
-      - name: Upload to Google Play
+      - name: Google Play'e gönder
         working-directory: shipper
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -191,14 +191,18 @@ jobs:
         with: { ruby-version: "3.3", bundler-cache: true, working-directory: shipper }
 
       # SwiftPM paketleri (Capacitor eklentileri vb.) her seferinde baştan indirilmesin
-      - name: SwiftPM önbelleği
+      - name: SwiftPM + derleme önbelleği
         uses: actions/cache@v4
         with:
-          path: ~/spm-cache
-          key: spm-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved') }}
-          restore-keys: spm-${{ runner.os }}-${{ inputs.repo }}-
-      - name: SwiftPM klasörünü ayarla
-        run: echo "IOS_SPM_DIR=$HOME/spm-cache" >> "$GITHUB_ENV"
+          path: |
+            ~/spm-cache
+            ~/ship-derived
+          key: ios-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved') }}
+          restore-keys: ios-${{ runner.os }}-${{ inputs.repo }}-
+      - name: Önbellek klasörlerini ayarla
+        run: |
+          echo "IOS_SPM_DIR=$HOME/spm-cache" >> "$GITHUB_ENV"
+          echo "IOS_DERIVED_DIR=$HOME/ship-derived" >> "$GITHUB_ENV"
 
       - name: Prepare (${{ needs.detect.outputs.type }})
         env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
@@ -207,7 +211,7 @@ jobs:
       - name: Detect Xcode project
         run: bash "$SHIPPER/scripts/ios-detect.sh"
 
-      - name: Sign, build & upload to TestFlight
+      - name: İmzala, derle ve TestFlight'a gönder
         working-directory: shipper
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
