@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bağımlılıkları kurar ve native projeyi build'e hazır hale getirir.
+# Bağımlılıkları kurar ve native projeyi build'e hazır hale getirir (Turbo CI modunda).
 # usage: prepare.sh <android|ios>
 # env: TYPE PM APP_DIR PREPARE_CMD BUILD_NUMBER VERSION SECRETS_JSON(ops.) SLUG(ops.)
 set -euo pipefail
@@ -15,10 +15,10 @@ fi
 install_js() {
   [ -f package.json ] || return 0
   case "$PM" in
-    pnpm) corepack enable; pnpm install --frozen-lockfile ;;
-    yarn) corepack enable; if [ -f .yarnrc.yml ]; then yarn install --immutable; else yarn install --frozen-lockfile; fi ;;
+    pnpm) corepack enable; pnpm install --frozen-lockfile --prefer-offline ;;
+    yarn) corepack enable; if [ -f .yarnrc.yml ]; then yarn install --immutable; else yarn install --frozen-lockfile --prefer-offline; fi ;;
     bun)  npm i -g bun; bun install --frozen-lockfile ;;
-    *)    if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
+    *)    if [ -f package-lock.json ]; then npm ci --prefer-offline --no-audit --no-fund; else npm install --prefer-offline --no-audit --no-fund; fi ;;
   esac
 }
 run() { if [ "$PM" = npm ]; then npm run "$@"; else "$PM" run "$@"; fi; }
@@ -28,7 +28,7 @@ pods() {
   local dir="$1"
   [ -f "$dir/Podfile" ] || return 0
   ( cd "$dir"
-    if [ -f Gemfile ]; then bundle install && bundle exec pod install; else pod install; fi )
+    if [ -f Gemfile ]; then bundle install --quiet && bundle exec pod install; else pod install; fi )
 }
 
 case "$TYPE" in

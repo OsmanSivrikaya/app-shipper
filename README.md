@@ -132,11 +132,34 @@ Bir gönderimin hata logu: `gh run view <id> --repo OsmanSivrikaya/app-shipper -
 
 ---
 
-## 6. Repo yapısı
+## 6. Masaüstü Uygulaması (Windows & macOS)
+
+Projeyi hem komut satırından (`ship`) hem de modern masaüstü arayüzünden kullanabilirsiniz:
+
+```bash
+npm install
+npm start          # Masaüstü uygulamasını başlatır
+npm run dist:win   # Windows (.exe) kurulum paketi üretir (dist/ klasörüne)
+npm run dist:mac   # macOS (.dmg) paketi üretir (Mac üzerinde çalıştırıldığında)
+```
+
+### Masaüstü Uygulaması Özellikleri:
+- **Proje Klasörü Seçimi & Otomatik Senkronizasyon:** Bilgisayarınızdaki herhangi bir mobil proje klasörünü seçebilirsiniz (sürükle-bırak destekli). Klasör henüz GitHub'da değilse veya commitlenmemiş değişiklikler varsa gönderim öncesi otomatik senkronize eder.
+- **Çoklu Apple & Google Play Hesap Profilleri:** Farklı müşteriler veya hesaplar için ayrı Apple Developer ve Google Play profilleri kaydedebilir, gönderirken hangi Apple ve hangi Google hesabının kullanılacağını ayrı ayrı seçebilirsiniz.
+- **Tek Tıkla Gönderim:** **Apple'a Gönder**, **Google'a Gönder** veya **İkisine Birden Gönder** butonları.
+- **Canlı Yükleniyor Efekti & Adım Takibi:** Orbital yükleniyor animasyonu, ilerleme çubuğu, kalan süre tahmini ve adım adım canlı log takibi.
+
+---
+
+## 7. Repo yapısı
 
 ```
+desktop/main.mjs             Electron ana süreç (klasör analizi, çoklu hesap, Git & Actions senkronizasyonu)
+desktop/index.html           Masaüstü arayüzü (Uygulama Gönder, Hesaplar, Son Gönderimler, Ayarlar)
+desktop/styles.css           Karanlık tema & canlı yükleme animasyonları
+desktop/renderer.js          Arayüz mantığı ve canlı ilerleme takibi
 bin/ship.mjs                 CLI (ship, setup, play, doctor, init, keystore, env, status)
-.github/workflows/ship.yml   detect → android ‖ ios
+.github/workflows/ship.yml   detect → android ‖ ios (çoklu profil destekli)
 scripts/detect.sh            proje tipi, klasörler, build numarası
 scripts/prepare.sh           bağımlılık kurulumu + web build + cap sync
 scripts/android-*.sh         imza + versionCode enjeksiyonu, AAB üretimi

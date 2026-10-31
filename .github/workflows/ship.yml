@@ -1,7 +1,7 @@
 name: Ship
 run-name: "🚀 ${{ inputs.repo }}@${{ inputs.ref || 'default' }} → ${{ inputs.platforms }}"
 
-# Tetikleyenler: `ship <repo>` CLI'ı  veya  proje reposundaki ship-on-tag.yml (v* tag push)
+# Tetikleyenler: `ship <repo>` CLI'ı, Masaüstü Uygulaması veya proje reposundaki ship-on-tag.yml (v* tag push)
 on:
   workflow_dispatch:
     inputs:
@@ -32,6 +32,14 @@ on:
         type: choice
         options: [completed, draft]
         default: completed
+      apple_profile:
+        description: Apple hesap profili (boş = varsayılan)
+        type: string
+        default: ""
+      google_profile:
+        description: Google Play hesap profili (boş = varsayılan)
+        type: string
+        default: ""
 
 concurrency:
   group: ship-${{ inputs.repo }}
@@ -58,13 +66,14 @@ jobs:
       npm_lock: ${{ steps.d.outputs.npm_lock }}
     steps:
       - uses: actions/checkout@v4
-        with: { path: shipper }
+        with: { path: shipper, fetch-depth: 1 }
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.ref }}
           token: ${{ secrets.SOURCE_TOKEN }}
           path: app
+          fetch-depth: 1
       - id: d
         env:
           REPO: ${{ inputs.repo }}
@@ -80,6 +89,7 @@ jobs:
       TYPE: ${{ needs.detect.outputs.type }}
       PM: ${{ needs.detect.outputs.pm }}
       SLUG: ${{ needs.detect.outputs.slug }}
+      GOOGLE_PROFILE: ${{ inputs.google_profile }}
       APP_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}
       ANDROID_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}/${{ needs.detect.outputs.android_dir }}
       PREPARE_CMD: ${{ needs.detect.outputs.prepare_cmd }}
@@ -89,23 +99,24 @@ jobs:
     steps:
       - name: Gizli anahtarlar tam mı? (build'den ÖNCE kontrol)
         env:
-          PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PLAY: ${{ inputs.google_profile != '' && secrets[format('PLAY_SERVICE_ACCOUNT_JSON_{0}', inputs.google_profile)] || secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          KS: ${{ inputs.google_profile != '' && secrets[format('ANDROID_KEYSTORE_BASE64_{0}', inputs.google_profile)] || secrets.ANDROID_KEYSTORE_BASE64 }}
           KS_APP: ${{ secrets[format('ANDROID_KEYSTORE_BASE64_{0}', needs.detect.outputs.slug)] }}
         run: |
           fail=0
-          if [ -z "$PLAY" ]; then echo "::error::PLAY_SERVICE_ACCOUNT_JSON secret'ı yok → terminalde: ship play <service-account.json>"; fail=1
-          elif ! jq -e '.client_email and .private_key' >/dev/null 2>&1 <<<"$PLAY"; then echo "::error::PLAY_SERVICE_ACCOUNT_JSON geçerli bir service account anahtarı değil (client_email/private_key yok) → ship play <doğru-dosya.json>"; fail=1; fi
-          if [ -z "$KS$KS_APP" ]; then echo "::error::Android keystore secret'ı yok → ship setup"; fail=1; fi
+          if [ -z "$PLAY" ]; then echo "::error::PLAY_SERVICE_ACCOUNT_JSON secret'ı yok → masaüstü uygulamasından veya terminalden Google Play hesabını ekleyin"; fail=1
+          elif ! jq -e '.client_email and .private_key' >/dev/null 2>&1 <<<"$PLAY"; then echo "::error::PLAY_SERVICE_ACCOUNT_JSON geçerli bir service account anahtarı değil (client_email/private_key yok)"; fail=1; fi
+          if [ -z "$KS$KS_APP" ]; then echo "::error::Android keystore secret'ı yok → masaüstü uygulamasından veya 'ship setup' ile ekleyin"; fail=1; fi
           exit $fail
       - uses: actions/checkout@v4
-        with: { path: shipper }
+        with: { path: shipper, fetch-depth: 1 }
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.ref }}
           token: ${{ secrets.SOURCE_TOKEN }}
           path: app
+          fetch-depth: 1
           submodules: recursive
           lfs: true
       - uses: actions/setup-node@v4
@@ -116,7 +127,22 @@ jobs:
           cache-dependency-path: ${{ needs.detect.outputs.npm_lock }}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "${{ needs.detect.outputs.java_version }}" }
+
+      # Turbo Android Önbelleği (Gradle caches + wrapper + CMake/.cxx + build cache)
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Android derleme önbelleği (Turbo Cache)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/build-cache
+            app/**/.cxx
+            app/**/android/.gradle
+          key: android-turbo-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/build.gradle*', 'app/**/gradle-wrapper.properties', 'app/**/package-lock.json', 'app/**/pubspec.lock') }}
+          restore-keys: |
+            android-turbo-${{ runner.os }}-${{ inputs.repo }}-
+
       - uses: subosito/flutter-action@v2
         if: needs.detect.outputs.type == 'flutter'
         with: { channel: stable, cache: true }
@@ -137,7 +163,7 @@ jobs:
       - name: Google Play'e gönder
         working-directory: shipper
         env:
-          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ inputs.google_profile != '' && secrets[format('PLAY_SERVICE_ACCOUNT_JSON_{0}', inputs.google_profile)] || secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           TRACK: ${{ inputs.android_track }}
           STATUS: ${{ inputs.android_status }}
         run: bundle exec fastlane android ship
@@ -159,6 +185,7 @@ jobs:
       TYPE: ${{ needs.detect.outputs.type }}
       PM: ${{ needs.detect.outputs.pm }}
       SLUG: ${{ needs.detect.outputs.slug }}
+      APPLE_PROFILE: ${{ inputs.apple_profile }}
       APP_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}
       IOS_DIR: ${{ github.workspace }}/app/${{ needs.detect.outputs.app_dir }}/${{ needs.detect.outputs.ios_dir }}
       IOS_SCHEME: ${{ needs.detect.outputs.ios_scheme }}
@@ -167,13 +194,14 @@ jobs:
       VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with: { path: shipper }
+        with: { path: shipper, fetch-depth: 1 }
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.ref }}
           token: ${{ secrets.SOURCE_TOKEN }}
           path: app
+          fetch-depth: 1
           submodules: recursive
           lfs: true
       - uses: maxim-lobanov/setup-xcode@v1
@@ -190,14 +218,16 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with: { ruby-version: "3.3", bundler-cache: true, working-directory: shipper }
 
-      # SwiftPM paketleri (Capacitor eklentileri vb.) her seferinde baştan indirilmesin
-      - name: SwiftPM + derleme önbelleği
+      # SwiftPM + CocoaPods + DerivedData önbelleği
+      - name: SwiftPM + Pods + derleme önbelleği
         uses: actions/cache@v4
         with:
           path: |
             ~/spm-cache
             ~/ship-derived
-          key: ios-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved') }}
+            ~/Library/Caches/CocoaPods
+            app/**/Pods
+          key: ios-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved', 'app/**/Podfile.lock') }}
           restore-keys: ios-${{ runner.os }}-${{ inputs.repo }}-
       - name: Önbellek klasörlerini ayarla
         run: |
@@ -214,12 +244,12 @@ jobs:
       - name: İmzala, derle ve TestFlight'a gönder
         working-directory: shipper
         env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
-          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          ASC_KEY_ID: ${{ inputs.apple_profile != '' && secrets[format('ASC_KEY_ID_{0}', inputs.apple_profile)] || secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ inputs.apple_profile != '' && secrets[format('ASC_ISSUER_ID_{0}', inputs.apple_profile)] || secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ inputs.apple_profile != '' && secrets[format('ASC_PRIVATE_KEY_{0}', inputs.apple_profile)] || secrets.ASC_PRIVATE_KEY }}
+          APPLE_TEAM_ID: ${{ inputs.apple_profile != '' && secrets[format('APPLE_TEAM_ID_{0}', inputs.apple_profile)] || secrets.APPLE_TEAM_ID }}
+          IOS_DIST_CERT_P12_BASE64: ${{ inputs.apple_profile != '' && secrets[format('IOS_DIST_CERT_P12_BASE64_{0}', inputs.apple_profile)] || secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ inputs.apple_profile != '' && secrets[format('IOS_DIST_CERT_PASSWORD_{0}', inputs.apple_profile)] || secrets.IOS_DIST_CERT_PASSWORD }}
         run: |
           export IOS_P12_PATH="$RUNNER_TEMP/dist.p12"
           echo "$IOS_DIST_CERT_P12_BASE64" | base64 --decode > "$IOS_P12_PATH"

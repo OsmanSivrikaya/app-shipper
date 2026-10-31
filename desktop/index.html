@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>App Shipper Studio — Cloud Mobile Release Engine</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Arka Plan Işık Küreleri (Glassmorphism Glow) -->
+  <div class="ambient-bg">
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+  </div>
+
+  <!-- Özel Üst Pencere Çubuğu (Frameless Titlebar) -->
+  <header class="titlebar">
+    <div class="titlebar-drag">
+      <span class="titlebar-logo">🚀</span>
+      <span class="titlebar-title">APP SHIPPER <span class="pro-pill">STUDIO PRO</span></span>
+      <span class="titlebar-divider">|</span>
+      <span class="titlebar-status" id="topCloudStatus">Cloud Mac &amp; Android Engine Ready</span>
+    </div>
+
+    <div class="titlebar-actions">
+      <button class="tb-chip" id="btnToggleSound" title="Ses Efektleri">🔊</button>
+      <button class="tb-chip" id="btnToggleLang" title="Dil / Language">TR</button>
+      <div class="win-controls">
+        <button class="win-btn" id="btnMinWin" title="Küçült">&#8211;</button>
+        <button class="win-btn" id="btnMaxWin" title="Büyüt">&#9633;</button>
+        <button class="win-btn win-close" id="btnCloseWin" title="Kapat">&#10005;</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════ GİRİŞ & LİSANS EKRANI (LOGIN PORTAL) ═══════════════════ -->
+  <div id="loginPortal" class="login-portal hidden">
+    <div class="login-container">
+      <div class="login-left">
+        <div class="login-brand-badge">✨ CLOUD CI/CD FOR MOBILE</div>
+        <h1>Windows ve Mac'ten Tek Tıkla <span class="grad-text">App Store &amp; Google Play</span></h1>
+        <p class="login-desc">
+          Xcode kurmanıza veya saatlerce derleme beklemenize gerek yok. Projelerinizi bir kez tanımlayın, ayrı Apple ve Google Play hesaplarınızla saniyeler içinde bulutta imzalayıp yayınlayın.
+        </p>
+
+        <div class="login-features">
+          <div class="lf-item">
+            <div class="lf-icon">🍎</div>
+            <div>
+              <strong>Windows'tan iOS TestFlight Build</strong>
+              <span>Bulut macOS + Xcode sunucularında otomatik sertifika ve arşivleme.</span>
+            </div>
+          </div>
+          <div class="lf-item">
+            <div class="lf-icon">🤖</div>
+            <div>
+              <strong>Otomatik İmzalı Android AAB</strong>
+              <span>Keystore yönetimi, otomatik artan versionCode ve Play Console aktarımı.</span>
+            </div>
+          </div>
+          <div class="lf-item">
+            <div class="lf-icon">🗂️</div>
+            <div>
+              <strong>Kayıtlı Proje Çalışma Alanları</strong>
+              <span>Her proje için ayrı iOS klasörü, ayrı Android klasörü ve özel mağaza hesabı.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="login-right">
+        <div class="login-card">
+          <h2>Stüdyoya Giriş Yap</h2>
+          <p class="subtitle">Lisans anahtarınız ve GitHub bulut hesabınızla oturum açın.</p>
+
+          <form id="formLogin" class="mt-16">
+            <div class="form-group">
+              <label>Lisans Anahtarı (Pro / Enterprise)</label>
+              <input type="text" id="loginLicenseKey" placeholder="SHIPPER-PRO-XXXX-XXXX" value="SHIPPER-PRO-2026-VIP" />
+            </div>
+
+            <div class="form-group">
+              <label>GitHub Fine-Grained / Personal Access Token</label>
+              <input type="password" id="loginGithubToken" placeholder="ghp_... veya github_pat_... (Mevcut gh oturumu varsa boş bırakın)" />
+              <span class="field-hint">
+                Token oluşturmak için: <a href="#" id="linkCreateToken">github.com/settings/tokens</a> (Repo &amp; Workflow yetkisi)
+              </span>
+            </div>
+
+            <div class="form-group">
+              <label>Merkezi Bulut Motoru Reposu</label>
+              <input type="text" id="loginShipperRepo" placeholder="app-shipper (Otomatik oluşturulur)" value="app-shipper" />
+            </div>
+
+            <button type="submit" class="btn btn-primary w-full btn-lg mt-8" id="btnSubmitLogin">
+              🚀 Stüdyoyu Etkinleştir ve Giriş Yap
+            </button>
+          </form>
+
+          <div class="or-divider"><span>VEYA</span></div>
+
+          <button type="button" class="btn btn-secondary w-full" id="btnWebOAuthLogin">
+            🌐 GitHub Web Tarayıcısı ile Tek Tıkla Bağlan
+          </button>
+          <div id="deviceCodeBox" class="device-code-box hidden">
+            <span>Tarayıcıda bu kodu girin:</span>
+            <strong id="deviceCodeText">----</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ ANA UYGULAMA İSKELETİ ═══════════════════ -->
+  <div class="app-layout" id="mainAppLayout">
+    <!-- Sol Menü -->
+    <aside class="sidebar">
+      <div class="user-profile-card" id="userProfileCard">
+        <img id="userAvatar" class="user-avatar" src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="avatar" />
+        <div class="user-info">
+          <div class="user-name" id="userNameText">Bağlanıyor...</div>
+          <div class="user-tier">
+            <span class="status-dot ok" id="ghStatusDot"></span>
+            <span id="userTierText">PRO LİSANS</span>
+          </div>
+        </div>
+        <button class="btn-icon" id="btnLogout" title="Oturumu Kapat / Hesap Değiştir">⇄</button>
+      </div>
+
+      <!-- KAYITLI PROJELERİM LİSTESİ (Tek Tıkla Seçim, Tekrar Klasör Seçmeye Son) -->
+      <div class="sidebar-projects-header">
+        <span>PROJELERİM</span>
+        <button class="btn-add-proj" id="btnNewProjectModal" title="Yeni Proje Ekle">+ Proje Ekle</button>
+      </div>
+
+      <div id="savedProjectsList" class="saved-projects-list">
+        <!-- JS ile doldurulur -->
+      </div>
+
+      <div class="sidebar-nav-label">YÖNETİM MERKEZİ</div>
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="workspace">
+          <span class="nav-icon">🚀</span>
+          <span data-i18n="nav_workspace">Yayın Stüdyosu (Ship)</span>
+        </button>
+        <button class="nav-item" data-tab="accounts">
+          <span class="nav-icon">🔑</span>
+          <span data-i18n="nav_accounts">Apple &amp; Google Hesapları</span>
+        </button>
+        <button class="nav-item" data-tab="history">
+          <span class="nav-icon">📊</span>
+          <span data-i18n="nav_history">Canlı Loglar &amp; Geçmiş</span>
+        </button>
+        <button class="nav-item" data-tab="settings">
+          <span class="nav-icon">⚙️</span>
+          <span data-i18n="nav_settings">Bulut Motoru &amp; Ayarlar</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Ana İçerik Alanı -->
+    <main class="main-content">
+
+      <!-- SEKME 1: YAYIN STÜDYOSU (SEÇİLİ PROJE VEYA HIZLI GÖNDERİM) -->
+      <section class="tab-panel active" id="tab-workspace">
+
+        <!-- Eğer henüz hiç proje eklenmemişse gösterilecek şık karşılama -->
+        <div id="emptyProjectsHero" class="empty-hero-card hidden">
+          <div class="empty-hero-icon">📦</div>
+          <h2>İlk Mobil Projenizi Stüdyoya Ekleyin</h2>
+          <p>
+            Her seferinde klasör seçmekle uğraşmayın! Projenizi bir kez kaydedin; <strong>iOS klasörünü</strong> ve <strong>Android klasörünü</strong> ayrı ayrı belirleyin (veya sadece iOS / sadece Android seçin). Sonrasında tek tıkla mağazalara gönderin.
+          </p>
+          <button class="btn btn-primary btn-lg mt-16" id="btnHeroAddProject">
+            ✨ + Yeni Proje Çalışma Alanı Oluştur
+          </button>
+        </div>
+
+        <!-- Seçili Proje Çalışma Alanı -->
+        <div id="activeProjectWorkspace">
+          <header class="workspace-header">
+            <div class="ws-title-group">
+              <div class="ws-icon" id="wsProjIcon">📱</div>
+              <div>
+                <div class="ws-title-row">
+                  <h1 id="wsProjName">Proje Seçin veya Ekleyin</h1>
+                  <span class="tag tag-accent" id="wsProjType">AUTO</span>
+                  <span class="badge" id="wsProjVersion">v1.0.0</span>
+                </div>
+                <p class="subtitle" id="wsProjSubtitle">Kayıtlı proje yapılandırması — Tekrar klasör seçmeden doğrudan derlemeye hazır.</p>
+              </div>
+            </div>
+            <div class="ws-header-actions">
+              <button class="btn btn-secondary" id="btnEditCurrentProject">✏️ Proje Ayarlarını Düzenle</button>
+              <button class="btn btn-primary" id="btnQuickNewProject">+ Yeni Proje</button>
+            </div>
+          </header>
+
+          <!-- Platform Durum ve Kaynak Klasör Kartları (iOS Ayrı / Android Ayrı) -->
+          <div class="platform-pipelines-grid">
+            <!-- iOS PIPELINE KARTI -->
+            <div class="pipeline-card ios-pipeline" id="cardIosPipeline">
+              <div class="pipeline-top">
+                <div class="pipeline-brand">
+                  <span class="pipeline-logo">🍎</span>
+                  <div>
+                    <h3>iOS &rarr; App Store / TestFlight</h3>
+                    <span class="pipeline-sub">Bulut macOS + Xcode Otomatik İmzalama</span>
+                  </div>
+                </div>
+                <label class="switch-toggle" title="Bu projede iOS derlemesini aç/kapat">
+                  <input type="checkbox" id="wsIosEnabled" checked />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div id="wsIosBody" class="pipeline-body">
+                <div class="path-box">
+                  <div class="path-label">📁 iOS Kaynak Proje Klasörü</div>
+                  <div class="path-row">
+                    <input type="text" id="wsIosPath" placeholder="iOS proje klasörü seçin..." readonly />
+                    <button type="button" class="btn btn-xs btn-secondary" id="btnPickWsIosPath">Değiştir</button>
+                  </div>
+                </div>
+
+                <div class="form-group mt-10">
+                  <label>🍎 Kullanılacak Apple Developer Hesabı</label>
+                  <select id="selAppleProfile"></select>
+                </div>
+              </div>
+
+              <div id="wsIosDisabledMsg" class="pipeline-disabled-msg hidden">
+                <span>🚫 Bu proje için iOS derlemesi devre dışı bırakıldı (Yalnız Android).</span>
+              </div>
+            </div>
+
+            <!-- ANDROID PIPELINE KARTI -->
+            <div class="pipeline-card android-pipeline" id="cardAndroidPipeline">
+              <div class="pipeline-top">
+                <div class="pipeline-brand">
+                  <span class="pipeline-logo">🤖</span>
+                  <div>
+                    <h3>Android &rarr; Google Play Console</h3>
+                    <span class="pipeline-sub">Bulut AAB Derleme &amp; Otomatik Keystore</span>
+                  </div>
+                </div>
+                <label class="switch-toggle" title="Bu projede Android derlemesini aç/kapat">
+                  <input type="checkbox" id="wsAndroidEnabled" checked />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div id="wsAndroidBody" class="pipeline-body">
+                <div class="path-box">
+                  <div class="path-label">📁 Android Kaynak Proje Klasörü</div>
+                  <div class="path-row">
+                    <input type="text" id="wsAndroidPath" placeholder="Android proje klasörü seçin..." readonly />
+                    <button type="button" class="btn btn-xs btn-secondary" id="btnPickWsAndroidPath">Değiştir</button>
+                  </div>
+                </div>
+
+                <div class="form-grid-2 mt-10">
+                  <div class="form-group">
+                    <label>🤖 Google Play Hesabı</label>
+                    <select id="selGoogleProfile"></select>
+                  </div>
+                  <div class="form-group">
+                    <label>📦 Yayın Kanalı (Track)</label>
+                    <select id="selAndroidTrack">
+                      <option value="internal">Internal Testing</option>
+                      <option value="alpha">Closed Testing (Alpha)</option>
+                      <option value="beta">Open Testing (Beta)</option>
+                      <option value="production">Production (Tam Yayın)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div id="wsAndroidDisabledMsg" class="pipeline-disabled-msg hidden">
+                <span>🚫 Bu proje için Android derlemesi devre dışı bırakıldı (Yalnız iOS).</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sürüm & Ek Araçlar Çubuğu -->
+          <div class="card release-options-bar">
+            <div class="release-bar-grid">
+              <div class="form-group mb-0">
+                <label>Yeni Sürüm Numarası (Opsiyonel)</label>
+                <input type="text" id="inpVersion" placeholder="Örn: 1.2.0 (Boşsa projedeki kalır, build no otomatik artar)" />
+              </div>
+              <div class="form-group mb-0">
+                <label>Git Branch / Etiket</label>
+                <input type="text" id="inpRef" placeholder="Varsayılan dal (main)" />
+              </div>
+              <div class="form-group mb-0">
+                <label>Google Play Durumu</label>
+                <select id="selAndroidDraft">
+                  <option value="completed">Tamamlandı Olarak Yayınla</option>
+                  <option value="draft">Taslak (Draft) Bırak</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="release-bar-bottom">
+              <label class="checkbox-label">
+                <input type="checkbox" id="chkAutoSyncGit" checked />
+                <span>Değişiklikleri derleme öncesi bulutla otomatik senkronize et (Commit &amp; Push)</span>
+              </label>
+              <div class="release-tools">
+                <button type="button" class="btn btn-xs btn-ghost" id="btnUploadProjectEnv">📄 .env Yükle</button>
+                <button type="button" class="btn btn-xs btn-ghost" id="btnUploadProjectKeystore">🔐 Özel Keystore (.jks)</button>
+                <button type="button" class="btn btn-xs btn-secondary" id="btnSaveWorkspaceChanges">💾 Proje Ayarlarını Kaydet</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- DEV GÖNDERİM BUTONLARI (AKTİF PLATFORMLARA GÖRE OTOMATİK AYARLANIR) -->
+          <div class="action-buttons-grid" id="shipButtonsContainer">
+            <button class="ship-action-btn btn-apple" id="btnShipApple" type="button">
+              <div class="ship-btn-icon">🍎</div>
+              <div class="ship-btn-texts">
+                <span class="ship-btn-title">Apple'a Gönder</span>
+                <span class="ship-btn-sub">Windows/Mac &rarr; Bulut Xcode &rarr; TestFlight</span>
+              </div>
+            </button>
+
+            <button class="ship-action-btn btn-google" id="btnShipGoogle" type="button">
+              <div class="ship-btn-icon">▶️</div>
+              <div class="ship-btn-texts">
+                <span class="ship-btn-title">Google'a Gönder</span>
+                <span class="ship-btn-sub">AAB Derle &amp; İmzala &rarr; Google Play</span>
+              </div>
+            </button>
+
+            <button class="ship-action-btn btn-both" id="btnShipBoth" type="button">
+              <div class="ship-btn-icon">🚀</div>
+              <div class="ship-btn-texts">
+                <span class="ship-btn-title">İkisine Birden Gönder</span>
+                <span class="ship-btn-sub">iOS + Android Paralel Bulut Gönderimi</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SEKME 2: APPLE & GOOGLE HESAPLARI -->
+      <section class="tab-panel" id="tab-accounts">
+        <header class="page-header">
+          <div>
+            <h1>Apple &amp; Google Hesap Profilleri</h1>
+            <p class="subtitle">Farklı müşteriler veya kendi uygulamalarınız için istediğiniz kadar Apple ve Google Play hesabı ekleyin.</p>
+          </div>
+        </header>
+
+        <div class="two-col-grid">
+          <!-- APPLE -->
+          <div class="card">
+            <div class="section-title-row">
+              <h3>🍎 Apple Developer Hesapları</h3>
+              <span class="badge">App Store Connect API</span>
+            </div>
+            <p class="help-text">
+              <code>appstoreconnect.apple.com</code> &rarr; Users and Access &rarr; Integrations &rarr; Team Keys &rarr; <strong>+</strong> (Admin)
+            </p>
+
+            <div id="appleProfilesList" class="profiles-list"></div>
+
+            <form id="formAppleAccount" class="account-form">
+              <h4>+ Yeni Apple Hesabı Ekle</h4>
+              <div class="form-group">
+                <label>Hesap / Profil Adı</label>
+                <input type="text" id="apLabel" placeholder="Örn: Ana Apple Hesabım, Müşteri X" required />
+              </div>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label>Key ID</label>
+                  <input type="text" id="apKeyId" placeholder="2X9R4H..." required />
+                </div>
+                <div class="form-group">
+                  <label>Team ID</label>
+                  <input type="text" id="apTeamId" placeholder="8A7B6C..." required />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Issuer ID</label>
+                <input type="text" id="apIssuerId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required />
+              </div>
+              <div class="form-group">
+                <label>.p8 Özel Anahtar Dosyası</label>
+                <div class="file-input-row">
+                  <input type="text" id="apP8Path" placeholder="AuthKey_XXXX.p8 seçin..." readonly required />
+                  <button type="button" class="btn btn-secondary" id="btnPickP8">Seç</button>
+                </div>
+              </div>
+              <label class="checkbox-label">
+                <input type="checkbox" id="apIsDefault" />
+                <span>Varsayılan Apple hesabı yap</span>
+              </label>
+              <button type="submit" class="btn btn-primary w-full mt-12" id="btnSaveApple">
+                🍎 Sertifika Üret ve Apple Hesabını Kaydet
+              </button>
+            </form>
+          </div>
+
+          <!-- GOOGLE -->
+          <div class="card">
+            <div class="section-title-row">
+              <h3>🤖 Google Play Hesapları</h3>
+              <span class="badge">Service Account JSON</span>
+            </div>
+            <p class="help-text">
+              Google Cloud &rarr; Service Accounts &rarr; Keys &rarr; Add Key (JSON). Play Console'da <strong>Sürümleri yönet</strong> yetkisi verin.
+            </p>
+
+            <div id="googleProfilesList" class="profiles-list"></div>
+
+            <form id="formGoogleAccount" class="account-form">
+              <h4>+ Yeni Google Play Hesabı Ekle</h4>
+              <div class="form-group">
+                <label>Hesap / Profil Adı</label>
+                <input type="text" id="gpLabel" placeholder="Örn: Oyun Stüdyosu Play, Kurumsal Play" required />
+              </div>
+              <div class="form-group">
+                <label>Service Account JSON Dosyası</label>
+                <div class="file-input-row">
+                  <input type="text" id="gpJsonPath" placeholder="service-account.json seçin..." readonly required />
+                  <button type="button" class="btn btn-secondary" id="btnPickPlayJson">Seç</button>
+                </div>
+              </div>
+
+              <details class="advanced-details mt-8">
+                <summary>Özel Upload Keystore (.jks) Kullan (Boşsa otomatik üretilir)</summary>
+                <div class="form-group mt-8">
+                  <label>Keystore (.jks) Dosyası</label>
+                  <div class="file-input-row">
+                    <input type="text" id="gpJksPath" placeholder="Otomatik üretilecek..." readonly />
+                    <button type="button" class="btn btn-secondary" id="btnPickGoogleJks">Seç</button>
+                  </div>
+                </div>
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label>Key Alias</label>
+                    <input type="text" id="gpKeyAlias" placeholder="upload" />
+                  </div>
+                  <div class="form-group">
+                    <label>Keystore Şifresi</label>
+                    <input type="password" id="gpStorePass" placeholder="••••••" />
+                  </div>
+                </div>
+              </details>
+
+              <label class="checkbox-label mt-8">
+                <input type="checkbox" id="gpIsDefault" />
+                <span>Varsayılan Google Play hesabı yap</span>
+              </label>
+              <button type="submit" class="btn btn-success w-full mt-12" id="btnSaveGoogle">
+                🤖 Google Play Hesabını Kaydet
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- SEKME 3: SON GÖNDERİMLER -->
+      <section class="tab-panel" id="tab-history">
+        <header class="page-header">
+          <div>
+            <h1>Canlı Loglar &amp; Gönderim Geçmişi</h1>
+            <p class="subtitle">Bulut motorunda çalışan ve tamamlanan son 20 derleme işlemi.</p>
+          </div>
+          <button class="btn btn-secondary" id="btnRefreshHistory">🔄 Listeyi Yenile</button>
+        </header>
+        <div class="card">
+          <div id="historyTableContainer" class="history-list"></div>
+        </div>
+      </section>
+
+      <!-- SEKME 4: AYARLAR -->
+      <section class="tab-panel" id="tab-settings">
+        <header class="page-header">
+          <div>
+            <h1>Bulut Motoru &amp; Stüdyo Ayarları</h1>
+            <p class="subtitle">Derlemelerin yürütüldüğü özel GitHub reponuz ve lisans bilgileriniz.</p>
+          </div>
+        </header>
+        <div class="card max-w-680">
+          <form id="formGeneralSettings">
+            <div class="form-group">
+              <label>Merkezi Derleme Reposu (app-shipper)</label>
+              <input type="text" id="setShipperRepo" placeholder="OsmanSivrikaya/app-shipper" required />
+            </div>
+            <div class="form-group mt-12">
+              <label>GitHub Erişim Anahtarı (SOURCE_TOKEN)</label>
+              <input type="password" id="setSourceToken" placeholder="github_pat_..." />
+            </div>
+            <label class="checkbox-label mt-12">
+              <input type="checkbox" id="setCreateRepo" />
+              <span>Merkezi repo GitHub hesabımda yoksa özel (private) olarak oluştur</span>
+            </label>
+            <div class="mt-16">
+              <button type="submit" class="btn btn-primary" id="btnSaveGeneral">💾 Ayarları Kaydet ve Senkronize Et</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ═══════════════════ PROJE EKLE / DÜZENLE MODALI ═══════════════════ -->
+  <div id="projectModal" class="shipping-overlay hidden">
+    <div class="shipping-modal max-w-680">
+      <div class="modal-header-row">
+        <h3>📦 Proje Çalışma Alanı Tanımla</h3>
+        <button type="button" class="btn-icon" id="btnCloseProjectModal">&#10005;</button>
+      </div>
+      <p class="subtitle">Projenizi bir kez ekleyin; iOS ve Android klasörlerini aynı veya farklı konumlardan seçin.</p>
+
+      <form id="formSaveProject" class="mt-16">
+        <input type="hidden" id="pmId" />
+        <div class="form-grid-icon">
+          <div class="form-group">
+            <label>İkon</label>
+            <select id="pmIcon">
+              <option value="📱">📱</option>
+              <option value="🚀">🚀</option>
+              <option value="🎮">🎮</option>
+              <option value="🛒">🛒</option>
+              <option value="💎">💎</option>
+              <option value="⚡">⚡</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Proje / Uygulama Adı</label>
+            <input type="text" id="pmName" placeholder="Örn: Tahmin Et, E-Ticaret App" required />
+          </div>
+        </div>
+
+        <!-- Hangi Platformlar Var? -->
+        <div class="platform-choice-boxes mt-8">
+          <label class="plat-check-box" id="boxCheckIos">
+            <input type="checkbox" id="pmIosEnabled" checked />
+            <span>🍎 <strong>iOS Build Alınacak</strong> (App Store / TestFlight)</span>
+          </label>
+          <label class="plat-check-box" id="boxCheckAndroid">
+            <input type="checkbox" id="pmAndroidEnabled" checked />
+            <span>🤖 <strong>Android Build Alınacak</strong> (Google Play)</span>
+          </label>
+        </div>
+
+        <!-- iOS Klasör Seçimi -->
+        <div id="pmIosSection" class="modal-plat-section mt-12">
+          <div class="form-group mb-0">
+            <label>🍎 iOS Proje Klasörü (Xcode / Capacitor / Flutter / Expo klasörü)</label>
+            <div class="file-input-row">
+              <input type="text" id="pmIosPath" placeholder="Bilgisayardan iOS proje klasörünü seçin..." readonly />
+              <button type="button" class="btn btn-secondary" id="btnPickPmIos">Klasör Seç</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Aynı klasörü kullan kısayolu -->
+        <div id="pmSameFolderRow" class="mt-8">
+          <label class="checkbox-label">
+            <input type="checkbox" id="pmSameFolder" checked />
+            <span>Android ve iOS aynı proje klasöründe (Tek klasör seçimi her ikisine uygulansın)</span>
+          </label>
+        </div>
+
+        <!-- Android Klasör Seçimi -->
+        <div id="pmAndroidSection" class="modal-plat-section mt-12">
+          <div class="form-group mb-0">
+            <label>🤖 Android Proje Klasörü (Farklı bir klasördeyse buradan seçin)</label>
+            <div class="file-input-row">
+              <input type="text" id="pmAndroidPath" placeholder="Bilgisayardan Android proje klasörünü seçin..." readonly />
+              <button type="button" class="btn btn-secondary" id="btnPickPmAndroid">Klasör Seç</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="shipping-footer mt-16">
+          <button type="button" class="btn btn-ghost" id="btnDeleteProjectInModal" style="color:#f87171">🗑️ Projeyi Sil</button>
+          <div class="flex-spacer"></div>
+          <button type="button" class="btn btn-secondary" id="btnCancelProjectModal">İptal</button>
+          <button type="submit" class="btn btn-primary">💾 Projeyi Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ YÜKLENİYOR & CANLI TELEMETRİ MODALI ═══════════════════ -->
+  <div id="shippingOverlay" class="shipping-overlay hidden">
+    <div class="shipping-modal">
+      <div class="shipping-hero">
+        <div class="orbital-loader" id="orbitalLoader">
+          <div class="orbit-ring ring-1"></div>
+          <div class="orbit-ring ring-2"></div>
+          <div class="orbit-core" id="loaderCoreIcon">🚀</div>
+        </div>
+        <div class="shipping-hero-info">
+          <div class="shipping-badge-row">
+            <span class="live-pulse" id="livePulseDot"></span>
+            <span class="shipping-phase-tag" id="shipPhaseTag">CANLI TELEMETRİ</span>
+            <span class="shipping-timer" id="shipElapsedTimer">0:00</span>
+          </div>
+          <h2 id="shipModalTitle">Mağazalara Gönderiliyor...</h2>
+          <p id="shipModalSubtitle">Bulut sunucularda derleme ve imzalama işlemi yürütülüyor.</p>
+        </div>
+      </div>
+
+      <div class="overall-progress-wrap">
+        <div class="overall-progress-top">
+          <span id="overallStatusLabel">Hazırlanıyor...</span>
+          <span id="overallPctLabel">0%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill shimmer" id="overallProgressBar" style="width: 6%"></div>
+        </div>
+      </div>
+
+      <div id="liveJobsContainer" class="live-jobs-grid"></div>
+
+      <div id="failedLogBox" class="failed-log-box hidden">
+        <div class="failed-log-header">Hata Detayı (GitHub Actions)</div>
+        <pre id="failedLogPre"></pre>
+      </div>
+
+      <div class="shipping-footer">
+        <button type="button" class="btn btn-secondary" id="btnOpenRunUrl">🌐 Bulut Sunucuda Canlı Gör</button>
+        <div class="flex-spacer"></div>
+        <button type="button" class="btn btn-ghost" id="btnHideOverlay">Arka Plana Al / Kapat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Özel Keystore Modalı -->
+  <div id="keystoreModal" class="shipping-overlay hidden">
+    <div class="shipping-modal max-w-500">
+      <h3>🔐 Projeye Özel Android Keystore Tanımla</h3>
+      <p class="subtitle mt-4">Bu uygulama daha önce farklı bir anahtarla Google Play'e yüklendiyse o anahtarı burada tanımlayın.</p>
+      <form id="formProjectKeystore" class="mt-16">
+        <div class="form-group">
+          <label>Keystore (.jks / .keystore) Dosyası</label>
+          <div class="file-input-row">
+            <input type="text" id="pkJksPath" readonly required placeholder="Dosya seçin..." />
+            <button type="button" class="btn btn-secondary" id="btnPickPkJks">Seç</button>
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label>Key Alias</label>
+            <input type="text" id="pkAlias" value="upload" required />
+          </div>
+          <div class="form-group">
+            <label>Keystore Şifresi</label>
+            <input type="password" id="pkStorePass" required />
+          </div>
+        </div>
+        <div class="shipping-footer mt-16">
+          <button type="button" class="btn btn-ghost" id="btnCloseKeystoreModal">İptal</button>
+          <button type="submit" class="btn btn-primary">Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>
