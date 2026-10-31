@@ -1,25 +1,21 @@
 #!/usr/bin/env bash
 # Projeye dokunmadan Android imzası + sürüm numarası + ultra-hızlı Gradle optimizasyonları enjekte eder.
-# Keystore önceliği: ANDROID_KEYSTORE_<SLUG>_* (uygulamaya özel) → ANDROID_KEYSTORE_<GOOGLE_PROFILE>_* (hesaba özel) → ANDROID_KEYSTORE_* (ortak)
-# env: SECRETS_JSON SLUG GOOGLE_PROFILE(ops.) BUILD_NUMBER VERSION
+# Keystore önceliği: Uygulamaya özel → Google profiline özel → Ortak
 set -euo pipefail
 
-s() { jq -r --arg k "$1" '.[$k] // empty' <<<"$SECRETS_JSON"; }
-pick() {
-  local v
-  v="$(s "ANDROID_${1}_${SLUG}")"
-  if [ -z "$v" ] && [ -n "${GOOGLE_PROFILE:-}" ]; then
-    v="$(s "ANDROID_${1}_${GOOGLE_PROFILE}")"
-  fi
-  [ -z "$v" ] && v="$(s "ANDROID_${1}")"
-  printf '%s' "$v"
-}
+KS_B64="${KS_B64_APP:-${KS_B64_PROF:-${KS_B64_DEF:-}}}"
+STORE_PASS="${KS_PASS_APP:-${KS_PASS_PROF:-${KS_PASS_DEF:-}}}"
+KEY_ALIAS="${KS_ALIAS_APP:-${KS_ALIAS_PROF:-${KS_ALIAS_DEF:-}}}"
+KEY_PASS="${KEY_PASS_APP:-${KEY_PASS_PROF:-${KEY_PASS_DEF:-}}}"
 
-KS_B64="$(pick KEYSTORE_BASE64)"
-if [ -z "$KS_B64" ]; then echo "::error::ANDROID_KEYSTORE_BASE64 secret'ı yok. Masaüstü uygulamasından veya 'ship setup' ile ekleyin."; exit 1; fi
-if [ -n "$(s "ANDROID_KEYSTORE_BASE64_${SLUG}")" ]; then
+if [ -z "$KS_B64" ]; then
+  echo "::error::ANDROID_KEYSTORE_BASE64 secret'ı yok. Masaüstü uygulamasından veya 'ship setup' ile ekleyin."
+  exit 1
+fi
+
+if [ -n "${KS_B64_APP:-}" ]; then
   echo "✔ Uygulamaya özel keystore ($SLUG)"
-elif [ -n "${GOOGLE_PROFILE:-}" ] && [ -n "$(s "ANDROID_KEYSTORE_BASE64_${GOOGLE_PROFILE}")" ]; then
+elif [ -n "${KS_B64_PROF:-}" ]; then
   echo "✔ Google profiline özel keystore ($GOOGLE_PROFILE)"
 else
   echo "✔ Ortak keystore"
@@ -27,7 +23,6 @@ fi
 
 KS="$RUNNER_TEMP/upload.jks"
 echo "$KS_B64" | base64 --decode > "$KS"
-STORE_PASS="$(pick KEYSTORE_PASSWORD)"; KEY_ALIAS="$(pick KEY_ALIAS)"; KEY_PASS="$(pick KEY_PASSWORD)"
 [ -z "$KEY_PASS" ] && KEY_PASS="$STORE_PASS"
 
 GH="${GRADLE_USER_HOME:-$HOME/.gradle}"

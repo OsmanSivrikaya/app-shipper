@@ -6,10 +6,13 @@ set -euo pipefail
 PLATFORM="$1"
 cd "$APP_DIR"
 
-# Proje .env'i: ENV_<SLUG> secret'ı varsa .env olarak yazılır (ör. ENV_TAHMIN_ET)
-if [ -n "${SECRETS_JSON:-}" ] && [ -n "${SLUG:-}" ]; then
-  ENV_CONTENT="$(jq -r --arg k "ENV_$SLUG" '.[$k] // empty' <<<"$SECRETS_JSON")"
-  if [ -n "$ENV_CONTENT" ]; then printf '%s\n' "$ENV_CONTENT" > .env; echo "✔ .env yazıldı (ENV_$SLUG)"; fi
+# Proje .env'i: ENV_CONTENT veya SECRETS_JSON varsa .env olarak yazılır
+if [ -n "${ENV_CONTENT:-}" ]; then
+  printf '%s\n' "$ENV_CONTENT" > .env
+  echo "✔ .env yazıldı"
+elif [ -n "${SECRETS_JSON:-}" ] && [ -n "${SLUG:-}" ]; then
+  EC="$(jq -r --arg k "ENV_$SLUG" '.[$k] // empty' <<<"$SECRETS_JSON")"
+  if [ -n "$EC" ]; then printf '%s\n' "$EC" > .env; echo "✔ .env yazıldı (ENV_$SLUG)"; fi
 fi
 
 install_js() {

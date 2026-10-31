@@ -1,5 +1,5 @@
 name: Ship
-run-name: "🚀 ${{ inputs.repo }}@${{ inputs.ref || 'default' }} → ${{ inputs.platforms }}"
+run-name: "Ship ${{ inputs.platforms }}"
 
 # Tetikleyenler: `ship <repo>` CLI'ı, Masaüstü Uygulaması veya proje reposundaki ship-on-tag.yml (v* tag push)
 on:
@@ -149,12 +149,25 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with: { ruby-version: "3.3", bundler-cache: true, working-directory: shipper }
 
-      - name: Prepare (${{ needs.detect.outputs.type }})
-        env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
+      - name: Prepare
+        env:
+          ENV_CONTENT: ${{ secrets[format('ENV_{0}', needs.detect.outputs.slug)] }}
         run: bash "$SHIPPER/scripts/prepare.sh" android
 
       - name: Signing + version
-        env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
+        env:
+          KS_B64_APP: ${{ secrets[format('ANDROID_KEYSTORE_BASE64_{0}', needs.detect.outputs.slug)] }}
+          KS_PASS_APP: ${{ secrets[format('ANDROID_KEYSTORE_PASSWORD_{0}', needs.detect.outputs.slug)] }}
+          KS_ALIAS_APP: ${{ secrets[format('ANDROID_KEY_ALIAS_{0}', needs.detect.outputs.slug)] }}
+          KEY_PASS_APP: ${{ secrets[format('ANDROID_KEY_PASSWORD_{0}', needs.detect.outputs.slug)] }}
+          KS_B64_PROF: ${{ inputs.google_profile != '' && secrets[format('ANDROID_KEYSTORE_BASE64_{0}', inputs.google_profile)] || '' }}
+          KS_PASS_PROF: ${{ inputs.google_profile != '' && secrets[format('ANDROID_KEYSTORE_PASSWORD_{0}', inputs.google_profile)] || '' }}
+          KS_ALIAS_PROF: ${{ inputs.google_profile != '' && secrets[format('ANDROID_KEY_ALIAS_{0}', inputs.google_profile)] || '' }}
+          KEY_PASS_PROF: ${{ inputs.google_profile != '' && secrets[format('ANDROID_KEY_PASSWORD_{0}', inputs.google_profile)] || '' }}
+          KS_B64_DEF: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS_DEF: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS_DEF: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS_DEF: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bash "$SHIPPER/scripts/android-signing.sh"
 
       - name: Build AAB
@@ -234,8 +247,9 @@ jobs:
           echo "IOS_SPM_DIR=$HOME/spm-cache" >> "$GITHUB_ENV"
           echo "IOS_DERIVED_DIR=$HOME/ship-derived" >> "$GITHUB_ENV"
 
-      - name: Prepare (${{ needs.detect.outputs.type }})
-        env: { SECRETS_JSON: "${{ toJSON(secrets) }}" }
+      - name: Prepare
+        env:
+          ENV_CONTENT: ${{ secrets[format('ENV_{0}', needs.detect.outputs.slug)] }}
         run: bash "$SHIPPER/scripts/prepare.sh" ios
 
       - name: Detect Xcode project

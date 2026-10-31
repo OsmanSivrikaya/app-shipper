@@ -1003,7 +1003,7 @@ async function triggerWorkflowAndFindRun(shipper, fields) {
     args.push('-f', `${k}=${v}`)
   }
 
-  const before = new Date(Date.now() - 8000).toISOString()
+  const before = new Date(Date.now() - 10000).toISOString()
   sendShipEvent({ phase: 'trigger', message: `🚀 ${fields.repo} → ${fields.platforms.toUpperCase()} pipeline başlatıldı!` })
   ghSync(args)
 
@@ -1012,7 +1012,7 @@ async function triggerWorkflowAndFindRun(shipper, fields) {
     await new Promise((r) => setTimeout(r, 2000))
     try {
       const list = JSON.parse(await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '10', '--json', 'databaseId,createdAt,displayTitle,url,status']))
-      run = list.find((r) => r.createdAt >= before && r.displayTitle.includes(fields.repo))
+      run = list.find((r) => r.createdAt >= before)
     } catch { /* ignore */ }
   }
   return run

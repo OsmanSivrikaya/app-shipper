@@ -112,7 +112,7 @@ async function ship(pos, flags) {
   for (let i = 0; i < 20 && !run; i++) {
     await sleep(2000)
     const list = JSON.parse(gh(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '10', '--json', 'databaseId,createdAt,displayTitle,url']))
-    run = list.find((r) => r.createdAt >= before && r.displayTitle.includes(repo))
+    run = list.find((r) => r.createdAt >= before)
   }
   if (!run) return console.log(`Takip: https://github.com/${shipper}/actions`)
   console.log(`   ${run.url}`)
