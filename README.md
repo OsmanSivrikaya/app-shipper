@@ -11,6 +11,14 @@
 
 </div>
 
+<p align="center">
+  <a href="../../releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/OsmanSivrikaya/app-shipper?color=2563eb" /></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/desktop-Windows%20%7C%20macOS-555" />
+  <img alt="Stores" src="https://img.shields.io/badge/ships%20to-TestFlight%20%7C%20Google%20Play-38bdf8" />
+  <a href="../../stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/OsmanSivrikaya/app-shipper?style=flat" /></a>
+</p>
+
 ---
 
 # 🇬🇧 English

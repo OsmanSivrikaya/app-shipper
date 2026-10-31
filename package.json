@@ -63,5 +63,32 @@
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
-  }
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/OsmanSivrikaya/app-shipper",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OsmanSivrikaya/app-shipper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OsmanSivrikaya/app-shipper/issues"
+  },
+  "keywords": [
+    "testflight",
+    "google-play",
+    "app-store-connect",
+    "ios",
+    "android",
+    "flutter",
+    "capacitor",
+    "react-native",
+    "expo",
+    "electron",
+    "github-actions",
+    "fastlane",
+    "ci-cd",
+    "mobile-deployment",
+    "windows",
+    "no-mac"
+  ]
 }
