@@ -1403,6 +1403,101 @@ function recordRunMeta(runId, info) {
   } catch { /* ignore */ }
 }
 
+// ─────────────────────── Yerel Unity / Xcode paketi (bulutta Unity çalışmaz) ───────────────────────
+// Unity projesi (veya Unity'nin ürettiği Xcode klasörü) seçilirse: yerelde Unity ile Xcode projesi üretilir,
+// sıkıştırılıp shipper reposuna geçici release olarak yüklenir; bulut Mac imzalayıp TestFlight'a gönderir.
+
+const isUnityProject = (dir) => fs.existsSync(path.join(dir, 'ProjectSettings', 'ProjectVersion.txt')) && fs.existsSync(path.join(dir, 'Assets'))
+const hasXcodeProject = (dir) => {
+  try { return fs.readdirSync(dir).some((n) => n.endsWith('.xcodeproj')) } catch { return false }
+}
+
+function unityEditorPath(version) {
+  const candidates = process.platform === 'darwin'
+    ? [`/Applications/Unity/Hub/Editor/${version}/Unity.app/Contents/MacOS/Unity`]
+    : [path.join(process.env['ProgramFiles'] || 'C:/Program Files', 'Unity', 'Hub', 'Editor', version, 'Editor', 'Unity.exe')]
+  return candidates.find((p) => fs.existsSync(p)) || ''
+}
+
+// ship.json proje klasöründe ya da bir üstünde (repo kökü) olabilir
+function readShipJson(dir) {
+  for (const d of [dir, path.dirname(dir)]) {
+    try { return JSON.parse(fs.readFileSync(path.join(d, 'ship.json'), 'utf8')) } catch { /* yok */ }
+  }
+  return {}
+}
+
+async function buildUnityXcode(projectDir) {
+  const version = (fs.readFileSync(path.join(projectDir, 'ProjectSettings', 'ProjectVersion.txt'), 'utf8').match(/m_EditorVersion:\s*(\S+)/) || [])[1]
+  const method = readShipJson(projectDir).unity?.iosMethod
+  if (!method) throw new Error('ship.json içinde unity.iosMethod yok (ör. "BizimSokak.Game.Editor.BuildScript.BuildIOS").')
+  // Seçim sırası: ship.json unity.editor (sürüm ya da tam yol) → projenin sürümü → kullanıcıya sor
+  const wanted = readShipJson(projectDir).unity?.editor
+  let editor = wanted && fs.existsSync(wanted) ? wanted : unityEditorPath(wanted || version)
+  if (!editor) {
+    const hub = process.platform === 'darwin' ? '/Applications/Unity/Hub/Editor' : path.join(process.env['ProgramFiles'] || 'C:/Program Files', 'Unity', 'Hub', 'Editor')
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: `Unity ${wanted || version} bulunamadı. Kullanılacak Unity programını seç`,
+      defaultPath: fs.existsSync(hub) ? hub : undefined,
+      properties: ['openFile'],
+      filters: process.platform === 'win32' ? [{ name: 'Unity.exe', extensions: ['exe'] }] : [],
+    })
+    if (picked.canceled || !picked.filePaths[0]) throw new Error(`Unity ${wanted || version} kurulu değil ve başka sürüm seçilmedi.`)
+    editor = picked.filePaths[0]
+  }
+  if (fs.existsSync(path.join(projectDir, 'Temp', 'UnityLockfile'))) {
+    try {
+      // Kilit dosyası açık projede silinemez/yazılamaz; kapalıysa artık kalmıştır
+      fs.rmSync(path.join(projectDir, 'Temp', 'UnityLockfile'))
+    } catch { throw new Error('Unity Editor bu projeyi açık tutuyor. Kapatıp tekrar dene.') }
+  }
+  const log = path.join(os.tmpdir(), `appshipper-unity-${Date.now()}.log`)
+  sendShipEvent({ phase: 'sync', message: `Unity (${editor}) ile Xcode projesi üretiliyor (birkaç dakika sürer)...` })
+  try {
+    await execFileAsync(editor, ['-batchmode', '-nographics', '-quit', '-projectPath', projectDir, '-logFile', log, '-executeMethod', method], {
+      windowsHide: true, maxBuffer: 16 * 1024 * 1024,
+    })
+  } catch (e) {
+    let tail = ''
+    try { tail = fs.readFileSync(log, 'utf8').split('\n').filter((l) => /error/i.test(l)).slice(-8).join('\n') } catch { /* ignore */ }
+    throw new Error(`Unity build başarısız (log: ${log})\n${tail}`)
+  }
+  const out = path.join(projectDir, 'Builds', 'iOS')
+  if (!hasXcodeProject(out)) throw new Error(`Unity build bitti ama ${out} içinde .xcodeproj yok (log: ${log}).`)
+  return out
+}
+
+async function shipLocalBundle(folder, user, payload, shipper) {
+  let xcodeDir = folder
+  if (isUnityProject(folder)) xcodeDir = await buildUnityXcode(folder)
+  if (!hasXcodeProject(xcodeDir)) throw new Error('Seçilen klasörde Unity projesi veya .xcodeproj yok.')
+
+  const tag = `local-${Date.now()}`
+  const archive = path.join(os.tmpdir(), `${tag}.tgz`)
+  sendShipEvent({ phase: 'sync', message: 'Xcode projesi sıkıştırılıyor...' })
+  await execFileAsync('tar', ['-czf', archive, '--exclude=*BurstDebugInformation_DoNotShip', '-C', xcodeDir, '.'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
+  const mb = Math.round(fs.statSync(archive).size / 1048576)
+  sendShipEvent({ phase: 'sync', message: `Buluta yükleniyor (${mb} MB)...` })
+  try {
+    await ghAsync(['release', 'create', tag, archive, '-R', shipper, '--title', tag, '--notes', 'App Shipper geçici yerel paket (iş bitince silinir)'], { timeout: 60 * 60 * 1000 })
+  } finally {
+    try { fs.rmSync(archive) } catch { /* ignore */ }
+  }
+
+  const projectName = (payload.projectName || path.basename(isUnityProject(folder) ? path.dirname(folder) : folder)).toLowerCase().replace(/[^a-z0-9-_]/g, '-')
+  const repo = `${user}/${projectName}`
+  const run = await triggerWorkflowAndFindRun(shipper, {
+    repo,
+    platforms: 'ios',
+    bundle_tag: tag,
+    version: payload.version || '',
+    apple_profile: payload.appleProfile || '',
+  })
+  if (!run) throw new Error(`Derleme başlatıldı ancak takip ID'si alınamadı: https://github.com/${shipper}/actions`)
+  recordRunMeta(run.databaseId, { projectId: payload.projectId || '', projectName: payload.projectName || '', repo, platforms: 'ios', version: payload.version || '' })
+  return { runIds: [run.databaseId], runId: run.databaseId, runUrl: run.url, repo, shipper }
+}
+
 ipcMain.handle('ship:start', async (_e, payload) => {
   // payload: { projectId, projectName, iosPath, androidPath, platforms, version, ref, appSubPath, androidTrack, isDraft, appleProfile, googleProfile, autoSyncGit }
   const shipper = getShipperRepo()
@@ -1482,6 +1577,12 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   const targetFolder = platforms === 'ios' ? iosFolder : platforms === 'android' ? androidFolder : (iosFolder || androidFolder)
   if (!targetFolder) {
     throw new Error('Seçilen platform için proje klasörü tanımlanmamış.')
+  }
+
+  // Unity projesi / hazır Xcode klasörü: GitHub'a değil, yerelde derleyip paket olarak gönder
+  if (platforms !== 'android' && (isUnityProject(targetFolder) || hasXcodeProject(targetFolder))) {
+    await syncPromise
+    return await shipLocalBundle(targetFolder, user, payload, shipper)
   }
 
   const synced = await syncFolderToGitHub(targetFolder, user, payload.autoSyncGit)

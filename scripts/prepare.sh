@@ -60,6 +60,9 @@ case "$TYPE" in
       pods ios
     fi
     ;;
+  unity)
+    [ "$PLATFORM" = ios ] && pods "${IOS_DIR:-Builds/iOS}"
+    ;;
   native)
     install_js
     [ -n "$PREPARE_CMD" ] && bash -c "$PREPARE_CMD"
