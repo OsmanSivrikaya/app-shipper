@@ -34,6 +34,7 @@
 - [Versions & build numbers](#versions--build-numbers)
 - [Speed](#speed)
 - [Command line (`ship`)](#command-line-ship)
+- [Unity projects (iOS)](#unity-projects-ios)
 - [Project config: `ship.json`](#project-config-shipjson)
 - [Security & privacy](#security--privacy)
 - [Troubleshooting](#troubleshooting)
@@ -226,6 +227,15 @@ Per-project settings:
 | `ship env <repo> .env.production` | Variables written to `.env` during the build |
 | `ship play key.json` | Upload/refresh the Google Play service-account key |
 
+## Unity projects (iOS)
+Unity can't be built in the cloud without a Unity licence, and iOS signing needs macOS. So the Unity step runs **on your computer** and only the signing/upload runs on the cloud Mac:
+1. Choose the **Unity project folder** (the one containing `Assets/` and `ProjectSettings/`) as the iOS folder. Choosing an already generated Xcode folder (e.g. `Builds/iOS`) skips the Unity build.
+2. The Desktop app runs Unity in batch mode (`unity.iosMethod` from `ship.json`) and produces the Xcode project. The editor defaults to the project's version (`ProjectSettings/ProjectVersion.txt`); set `unity.editor` (a version or a full path) to override it. If that version isn't installed you are asked to pick a Unity executable. Close the Unity Editor first, the project can't be open twice.
+3. The Xcode project is compressed, **encrypted with AES-256** and uploaded as a temporary release of the project's own (private) GitHub repo. The random key is stored only in the `BUNDLE_KEY` secret of your shipper repo.
+4. The cloud Mac downloads and decrypts it, signs it and uploads to TestFlight, then deletes the release.
+
+Needs: write access to the project repo for your GitHub account / `SOURCE_TOKEN`. Android for Unity isn't supported yet.
+
 ## Project config: `ship.json`
 Auto-detection is usually enough. Otherwise put this in your project root (all fields optional):
 ```json
@@ -233,9 +243,11 @@ Auto-detection is usually enough. Otherwise put this in your project root (all f
   "appPath": "frontend",
   "prepare": "npm run build",
   "android": { "dir": "android", "task": "bundleRelease" },
-  "ios": { "dir": "ios/App", "scheme": "App" }
+  "ios": { "dir": "ios/App", "scheme": "App" },
+  "unity": { "iosMethod": "Namespace.Class.Method", "editor": "6000.0.58f2" }
 }
 ```
+`unity` is only for Unity projects (`editor` optional).
 
 ## Security & privacy
 - Keys live **only** in GitHub Secrets of the repo you chose, and in `~/.app-shipper` on your computer (certificate, `.p8`, config). Nothing is sent to any other server.
@@ -243,6 +255,7 @@ Auto-detection is usually enough. Otherwise put this in your project root (all f
 - A public build repo is safe: secrets are not readable by forks or pull requests and are masked in logs. **Never commit `.p8`, `.p12`, `.jks`, `.env` or tokens.** `~/.app-shipper` is outside the repo.
 - Treat your GitHub token and `~/.app-shipper` like passwords.
 - Private source repos work: a token with access to them is stored as `SOURCE_TOKEN`.
+- Local Unity/Xcode bundles are encrypted and stored in the project's own repo, never in the (possibly public) shipper repo.
 
 ## Troubleshooting
 | Problem | Cause → Fix |
@@ -300,6 +313,7 @@ On Windows, if `electron-builder` fails extracting `winCodeSign` (symlink error)
 - [Sürüm ve build numarası](#sürüm-ve-build-numarası)
 - [Hız](#hız)
 - [Komut satırı (`ship`)](#komut-satırı-ship)
+- [Unity projeleri (iOS)](#unity-projeleri-ios)
 - [Proje ayarı: `ship.json`](#proje-ayarı-shipjson)
 - [Güvenlik ve gizlilik](#güvenlik-ve-gizlilik)
 - [Sorun giderme](#sorun-giderme)
@@ -492,6 +506,15 @@ Projeye özel ayarlar:
 | `ship env <repo> .env.production` | Build sırasında `.env` olarak yazılacak değişkenler |
 | `ship play anahtar.json` | Google Play service account anahtarını yükler/yeniler |
 
+## Unity projeleri (iOS)
+Unity, lisans olmadan bulutta derlenemez; iOS imzalama ise macOS ister. Bu yüzden Unity adımı **kendi bilgisayarında** çalışır, bulut Mac'e yalnızca imzalama ve yükleme kalır:
+1. iOS klasörü olarak **Unity proje klasörünü** seç (`Assets/` ve `ProjectSettings/` içeren). Daha önce üretilmiş bir Xcode klasörünü (ör. `Builds/iOS`) seçersen Unity build'i atlanır.
+2. Masaüstü uygulaması Unity'yi batch modda çalıştırıp (`ship.json` içindeki `unity.iosMethod`) Xcode projesini üretir. Editör varsayılan olarak projenin sürümüdür (`ProjectSettings/ProjectVersion.txt`); değiştirmek için `unity.editor` yaz (sürüm ya da tam yol). O sürüm kurulu değilse bir Unity programı seçmen istenir. Önce Unity Editor'ü kapat, proje iki kez açılamaz.
+3. Xcode projesi sıkıştırılır, **AES-256 ile şifrelenir** ve projenin kendi (özel) GitHub reposuna geçici release olarak yüklenir. Rastgele anahtar yalnızca shipper reposunun `BUNDLE_KEY` secret'ında durur.
+4. Bulut Mac paketi indirip çözer, imzalar, TestFlight'a yükler ve release'i siler.
+
+Gerekenler: GitHub hesabının / `SOURCE_TOKEN`'ın proje reposuna yazma izni. Unity için Android henüz desteklenmiyor.
+
 ## Proje ayarı: `ship.json`
 Otomatik tespit çoğu zaman yeter. Yanılırsa projenin köküne koy (hepsi opsiyonel):
 ```json
@@ -499,9 +522,11 @@ Otomatik tespit çoğu zaman yeter. Yanılırsa projenin köküne koy (hepsi ops
   "appPath": "frontend",
   "prepare": "npm run build",
   "android": { "dir": "android", "task": "bundleRelease" },
-  "ios": { "dir": "ios/App", "scheme": "App" }
+  "ios": { "dir": "ios/App", "scheme": "App" },
+  "unity": { "iosMethod": "Namespace.Class.Method", "editor": "6000.0.58f2" }
 }
 ```
+`unity` yalnızca Unity projeleri içindir (`editor` opsiyonel).
 
 ## Güvenlik ve gizlilik
 - Anahtarlar **yalnızca** seçtiğin reponun GitHub Secrets alanında ve bilgisayarındaki `~/.app-shipper` klasöründe (sertifika, `.p8`, ayarlar) durur. Başka hiçbir sunucuya gönderilmez.
@@ -509,6 +534,7 @@ Otomatik tespit çoğu zaman yeter. Yanılırsa projenin köküne koy (hepsi ops
 - Public derleme reposu güvenlidir: secret'lar fork'lar ve pull request'ler tarafından okunamaz, loglarda maskelenir. **`.p8`, `.p12`, `.jks`, `.env` veya token'ları asla commit'leme.** `~/.app-shipper` repo dışındadır.
 - GitHub token'ını ve `~/.app-shipper` klasörünü şifre gibi koru.
 - Özel (private) kaynak repolar çalışır: erişimi olan token `SOURCE_TOKEN` olarak saklanır.
+- Yerel Unity/Xcode paketleri şifrelenir ve (public olabilecek) shipper reposuna değil, projenin kendi reposuna konur.
 
 ## Sorun giderme
 | Sorun | Sebep → Çözüm |
