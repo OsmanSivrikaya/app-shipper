@@ -25,7 +25,68 @@ function showToast(msg, type = 'info') {
   el.className = `toast ${type}`
   el.textContent = msg
   container.appendChild(el)
+  // Keep at most 4 toasts on screen
+  while (container.children.length > 4) container.firstChild.remove()
   setTimeout(() => el.remove(), 4000)
+}
+
+// Turn raw gh/network errors into short Turkish messages
+function friendlyError(e) {
+  const raw = String((e && e.message) || e || '').replace(/^Error invoking remote method '[^']+': (Error: )?/, '').trim()
+  if (/ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|timed out|Could not resolve/i.test(raw)) return 'Bağlantı kurulamadı. İnternetinizi kontrol edip tekrar deneyin.'
+  if (/401|Bad credentials|auth login|not logged|authentication/i.test(raw)) return 'GitHub oturumu geçersiz. Lütfen yeniden giriş yapın.'
+  if (/403|rate limit/i.test(raw)) return 'GitHub isteği reddetti (yetki veya istek sınırı). Biraz sonra tekrar deneyin.'
+  if (/404|Not Found/i.test(raw)) return 'İstenen kayıt GitHub üzerinde bulunamadı.'
+  if (/ENOENT.*gh|gh: command not found/i.test(raw)) return 'GitHub CLI (gh) bulunamadı.'
+  return raw ? `Bir sorun oluştu: ${raw.slice(0, 160)}` : 'Bilinmeyen bir hata oluştu.'
+}
+
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+// Button busy state: disables the button and shows a spinner
+function setBusy(btn, busy, label) {
+  if (!btn) return
+  const t = btn.querySelector('span:last-child')
+  if (busy) {
+    if (btn.dataset.busy === '1') return
+    btn.dataset.busy = '1'
+    btn.disabled = true
+    btn.classList.add('is-busy')
+    if (label && t && !t.children.length) { btn.dataset.idleLabel = t.textContent; t.textContent = label }
+  } else {
+    delete btn.dataset.busy
+    btn.disabled = false
+    btn.classList.remove('is-busy')
+    if (btn.dataset.idleLabel !== undefined && t) { t.textContent = btn.dataset.idleLabel; delete btn.dataset.idleLabel }
+  }
+}
+
+function skeletonRows(n = 3, cls = '') {
+  return Array.from({ length: n }, () => `<div class="skeleton skel-row ${cls}"></div>`).join('')
+}
+
+function stateBlock({ icon = '', title, text = '', retryId = '', error = false }) {
+  return `<div class="state-block${error ? ' error' : ''}">
+    ${icon ? `<div class="state-icon">${icon}</div>` : ''}
+    <div class="state-title">${escapeHtml(title)}</div>
+    ${text ? `<div>${escapeHtml(text)}</div>` : ''}
+    ${retryId ? `<button type="button" class="btn btn-secondary btn-xs" id="${retryId}">Tekrar Dene</button>` : ''}
+  </div>`
+}
+
+const debounce = (fn, ms = 200) => {
+  let t
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms) }
+}
+
+// Runs an async poll function on an interval without overlapping calls
+function startGuardedPoll(fn, ms) {
+  let busy = false
+  return setInterval(async () => {
+    if (busy) return
+    busy = true
+    try { await fn() } finally { busy = false }
+  }, ms)
 }
 
 function formatSec(sec) {
@@ -71,6 +132,7 @@ $('btnJumpGoogleAccount')?.addEventListener('click', () => switchTab('accounts')
 
 // Başlangıç
 async function initApp() {
+  $('savedProjectsList').innerHTML = skeletonRows(3)
   try {
     const data = await window.shipperAPI.init()
     state.shipperRepo = data.shipperRepo || ''
@@ -100,7 +162,9 @@ async function initApp() {
       showEmptyProjectsState()
     }
   } catch (e) {
-    showToast(e.message, 'error')
+    $('savedProjectsList').innerHTML = stateBlock({ icon: '⚠', title: 'Yüklenemedi', text: friendlyError(e), retryId: 'btnRetryInit', error: true })
+    $('btnRetryInit')?.addEventListener('click', initApp)
+    showToast(friendlyError(e), 'error')
   }
 }
 
@@ -186,7 +250,7 @@ function showEmptyProjectsState() {
 function renderProjectsSidebar() {
   const container = $('savedProjectsList')
   if (!state.projects.length) {
-    container.innerHTML = `<div class="empty-hint">Kayıtlı proje yok</div>`
+    container.innerHTML = stateBlock({ icon: '📦', title: 'Henüz proje yok', text: 'Başlamak için + ile bir klasör ekleyin.' })
     return
   }
 
@@ -201,7 +265,7 @@ function renderProjectsSidebar() {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
         </div>
         <div class="proj-sb-meta">
-          <div class="proj-sb-name">${p.name}</div>
+          <div class="proj-sb-name">${escapeHtml(p.name)}</div>
           <div class="proj-sb-sub">
             <span>${ver}</span>
             ${iosBadge}
@@ -227,12 +291,14 @@ async function selectProject(id) {
     return
   }
   state.activeProjectId = proj.id
+  const selToken = (state.selToken = (state.selToken || 0) + 1)
 
   // Yerel klasörden güncel versiyon ve Bundle ID bilgilerini oku
   const targetFolder = proj.iosPath || proj.androidPath
   if (targetFolder) {
     try {
       const liveInfo = await window.shipperAPI.inspectProject(targetFolder)
+      if (selToken !== state.selToken) return
       if (liveInfo) {
         if (liveInfo.version && liveInfo.version !== '0.0.0') proj.version = liveInfo.version
         if (liveInfo.buildNumber) proj.buildNumber = liveInfo.buildNumber
@@ -284,16 +350,18 @@ async function refreshStoreStatus() {
   const proj = state.projects.find((p) => p.id === state.activeProjectId)
   if (!proj || !proj.iosEnabled) return
 
-  $('storeLiveVersion').textContent = 'Sorgulanıyor...'
-  $('storeLiveLastBuild').textContent = '...'
-  $('storeLiveNextBuild').textContent = '...'
+  const storeToken = (state.storeToken = (state.storeToken || 0) + 1)
+  const storeEls = ['storeLiveVersion', 'storeLiveLastBuild', 'storeLiveNextBuild'].map($)
+  storeEls.forEach((el) => { el.textContent = 'Sorgulanıyor'; el.classList.add('skel-text') })
   $('storeLiveDot').className = 'live-dot'
+  setBusy($('btnRefreshStoreStatus'), true)
 
   try {
     const res = await window.shipperAPI.fetchStoreStatus({
       bundleId: proj.iosBundleId || '',
       appleProfileSlug: $('selAppleProfile').value || proj.appleProfile || '',
     })
+    if (storeToken !== state.storeToken) return
     state.lastStoreStatus = res
 
     if (!res || !res.found) {
@@ -322,9 +390,15 @@ async function refreshStoreStatus() {
     $('inpVersion').placeholder = `Otomatik (${baseVer})`
     $('inpBuildNumber').placeholder = `Otomatik (#${res.nextBuildNumber || '1'})`
   } catch {
+    if (storeToken !== state.storeToken) return
     $('storeLiveVersion').textContent = `Yerel: v${proj.version || '1.0.0'}`
     $('storeLiveLastBuild').textContent = '—'
     $('storeLiveNextBuild').textContent = 'Otomatik'
+  } finally {
+    if (storeToken === state.storeToken) {
+      storeEls.forEach((el) => el.classList.remove('skel-text'))
+      setBusy($('btnRefreshStoreStatus'), false)
+    }
   }
 }
 
@@ -944,7 +1018,8 @@ function openLoadingOverlay(platforms) {
   loader.className = 'spinner-lg'
   $('minBarSpinner').className = 'spinner-sm'
   $('failedLogBox').classList.add('hidden')
-  $('liveJobsContainer').innerHTML = ''
+  $('liveJobsContainer').innerHTML = skeletonRows(2)
+  delete $('liveJobsContainer').dataset.lastHtml
   $('btnHideOverlayText').textContent = 'Arka Planda Devam Et'
 
   const curProj = state.projects.find((p) => p.id === state.activeProjectId)
@@ -973,6 +1048,7 @@ function openLoadingOverlay(platforms) {
   }, 1000)
 }
 
+let _lastProgressSent = null
 function updateProgressUI(pct, statusLabel) {
   const safePct = Math.max(5, Math.min(100, Math.round(pct)))
   $('overallPctLabel').textContent = `${pct}%`
@@ -984,7 +1060,11 @@ function updateProgressUI(pct, statusLabel) {
     $('overallStatusLabel').textContent = statusLabel
     $('minBarStatus').textContent = statusLabel
   }
-  window.shipperAPI.setProgress(state.isBuildRunning ? safePct / 100 : -1)
+  const sent = state.isBuildRunning ? safePct / 100 : -1
+  if (sent !== _lastProgressSent) {
+    _lastProgressSent = sent
+    window.shipperAPI.setProgress(sent)
+  }
 }
 
 function renderLiveJobs(runData) {
@@ -1016,7 +1096,7 @@ function renderLiveJobs(runData) {
   }
   updateProgressUI(overallPct, statusText)
 
-  container.innerHTML = jobs.map((j) => {
+  const html = jobs.map((j) => {
     let jStatus = 'Sırada'
     if (j.status === 'in_progress') jStatus = `${j.pct}%`
     else if (j.status === 'completed') {
@@ -1058,6 +1138,11 @@ function renderLiveJobs(runData) {
       </div>
     `
   }).join('')
+  // Skip the DOM rewrite when nothing changed since the last poll
+  if (container.dataset.lastHtml !== html) {
+    container.dataset.lastHtml = html
+    container.innerHTML = html
+  }
 }
 
 async function startShipping(platforms) {
@@ -1071,7 +1156,17 @@ async function startShipping(platforms) {
     return showToast('Android klasörü seçilmemiş', 'error')
   }
 
-  await saveActiveWorkspaceProject()
+  if (state.shipStarting) return
+  state.shipStarting = true
+  const shipBtns = ['btnShipApple', 'btnShipGoogle', 'btnShipBoth'].map($)
+  shipBtns.forEach((b) => setBusy(b, true))
+  try {
+    await saveActiveWorkspaceProject()
+  } catch (e) {
+    state.shipStarting = false
+    shipBtns.forEach((b) => setBusy(b, false))
+    return showToast(friendlyError(e), 'error')
+  }
   openLoadingOverlay(platforms)
 
   const curProj = state.projects.find((p) => p.id === state.activeProjectId)
@@ -1158,8 +1253,10 @@ async function startShipping(platforms) {
       } catch { /* ignore */ }
     }
 
+    state.shipStarting = false
+    shipBtns.forEach((b) => setBusy(b, false))
     await pollFn()
-    state.pollTimer = setInterval(pollFn, 3000)
+    state.pollTimer = startGuardedPoll(pollFn, 3000)
   } catch (e) {
     state.isBuildRunning = false
     clearInterval(state.elapsedTimer)
@@ -1169,8 +1266,11 @@ async function startShipping(platforms) {
     $('orbitalLoader').classList.add('failed')
     $('minBarSpinner').classList.add('failed')
     $('shipPhaseTag').textContent = 'HATA'
-    updateProgressUI(100, e.message)
-    showToast(e.message, 'error')
+    updateProgressUI(100, friendlyError(e))
+    showToast(friendlyError(e), 'error')
+  } finally {
+    state.shipStarting = false
+    shipBtns.forEach((b) => setBusy(b, false))
   }
 }
 
@@ -1259,7 +1359,7 @@ function renderHistoryTable() {
   if (state.historyPage < 1) state.historyPage = 1
 
   if (!totalItems) {
-    container.innerHTML = `<div class="empty-hint">Seçilen filtrelere uygun gönderim kaydı bulunamadı.</div>`
+    container.innerHTML = stateBlock({ icon: '🗂', title: 'Gönderim kaydı yok', text: state.historyList.length ? 'Seçilen filtrelere uygun kayıt bulunamadı.' : 'İlk gönderiminizden sonra kayıtlar burada görünecek.' })
     pageBar?.classList.add('hidden')
     return
   }
@@ -1360,8 +1460,11 @@ function renderHistoryTable() {
       state.activeRunUrl = btn.dataset.watchUrl
       openLoadingOverlay(btn.dataset.watchPlat || 'both')
       if (state.pollTimer) clearInterval(state.pollTimer)
-      state.pollTimer = setInterval(async () => {
-        const runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
+      state.pollTimer = startGuardedPoll(async () => {
+        let runData
+        try {
+          runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
+        } catch { return }
         renderLiveJobs(runData)
         if (runData.status === 'completed') {
           state.isBuildRunning = false
@@ -1377,13 +1480,17 @@ function renderHistoryTable() {
 
 async function loadHistoryList() {
   const container = $('historyTableContainer')
-  container.innerHTML = `<div class="empty-hint">Yükleniyor...</div>`
+  container.innerHTML = skeletonRows(6, 'sm')
+  setBusy($('btnRefreshHistory'), true)
   try {
     state.historyList = await window.shipperAPI.getHistory()
     populateHistoryProjectDropdown()
     renderHistoryTable()
   } catch (e) {
-    container.innerHTML = `<div class="empty-hint">${e.message}</div>`
+    container.innerHTML = stateBlock({ icon: '⚠', title: 'Geçmiş yüklenemedi', text: friendlyError(e), retryId: 'btnRetryHistory', error: true })
+    $('btnRetryHistory')?.addEventListener('click', loadHistoryList)
+  } finally {
+    setBusy($('btnRefreshHistory'), false)
   }
 }
 
@@ -1391,10 +1498,11 @@ async function loadHistoryList() {
   const el = $(id)
   if (!el) return
   const ev = el.tagName === 'INPUT' ? 'input' : 'change'
-  el.addEventListener(ev, () => {
+  const onChange = () => {
     state.historyPage = 1
     renderHistoryTable()
-  })
+  }
+  el.addEventListener(ev, ev === 'input' ? debounce(onChange, 180) : onChange)
 })
 
 $('btnRefreshHistory').addEventListener('click', loadHistoryList)

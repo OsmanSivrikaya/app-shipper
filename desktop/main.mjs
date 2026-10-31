@@ -225,6 +225,8 @@ async function ghAsync(args, opts = {}) {
   try {
     const { stdout } = await execFileAsync(findGh(), args, {
       encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 32 * 1024 * 1024,
       env: ghEnv(),
       ...opts,
     })
@@ -237,17 +239,43 @@ async function ghAsync(args, opts = {}) {
 const setSecret = (repo, name, value) => ghSync(['secret', 'set', name, '-R', repo], { input: value })
 const slugOf = (str) => str.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/^_+|_+$/g, '')
 
+// Short-lived cache so repeated IPC calls don't spawn gh each time (cleared on login/logout)
+let _userCache = null
+const USER_CACHE_MS = 60_000
+const userCacheKey = () => loadConfig().token || ''
+const readUserCache = () => (_userCache && _userCache.key === userCacheKey() && Date.now() - _userCache.at < USER_CACHE_MS ? _userCache.val : undefined)
+
+function toUserProfile(raw) {
+  const u = JSON.parse(raw)
+  return {
+    login: u.login,
+    name: u.name || u.login,
+    avatarUrl: u.avatar_url || '',
+    htmlUrl: u.html_url || '',
+    plan: u.plan?.name || 'Pro',
+  }
+}
+
+async function getGhUserProfileAsync() {
+  const hit = readUserCache()
+  if (hit !== undefined) return hit
+  try {
+    const val = toUserProfile(await ghAsync(['api', 'user']))
+    _userCache = { key: userCacheKey(), at: Date.now(), val }
+    return val
+  } catch {
+    return null
+  }
+}
+
 function getGhUserProfile() {
+  const hit = readUserCache()
+  if (hit !== undefined) return hit
   try {
     const raw = ghSync(['api', 'user'])
-    const u = JSON.parse(raw)
-    return {
-      login: u.login,
-      name: u.name || u.login,
-      avatarUrl: u.avatar_url || '',
-      htmlUrl: u.html_url || '',
-      plan: u.plan?.name || 'Pro',
-    }
+    const val = toUserProfile(raw)
+    _userCache = { key: userCacheKey(), at: Date.now(), val }
+    return val
   } catch {
     return null
   }
@@ -289,6 +317,15 @@ function getShipperRepo() {
     return ownRepo
   }
   return ''
+}
+
+async function ensureUserShipperRepoExistsAsync(shipper) {
+  if (!shipper) return
+  try {
+    await ghAsync(['repo', 'view', shipper])
+  } catch {
+    ensureUserShipperRepoExists(shipper)
+  }
 }
 
 function ensureUserShipperRepoExists(shipper) {
@@ -462,7 +499,7 @@ function detectTypeInDir(d) {
   return ''
 }
 
-function inspectProjectFolder(folderPath) {
+async function inspectProjectFolder(folderPath) {
   if (!folderPath || !fs.existsSync(folderPath)) throw new Error('Klasör bulunamadı.')
 
   let shipJson = {}
@@ -600,19 +637,19 @@ function inspectProjectFolder(folderPath) {
   let hasGit = false
 
   try {
-    const inside = execFileSync('git', ['-C', folderPath, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    const inside = await gitOut(folderPath, ['rev-parse', '--is-inside-work-tree'])
     if (inside === 'true') {
       hasGit = true
       try {
-        const url = execFileSync('git', ['-C', folderPath, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+        const url = await gitOut(folderPath, ['remote', 'get-url', 'origin'])
         const m = url.match(/github\.com[:/](.+?\/.+?)(\.git)?$/)
         if (m) gitRepo = m[1]
       } catch { /* remote yok */ }
       try {
-        gitBranch = execFileSync('git', ['-C', folderPath, 'branch', '--show-current'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+        gitBranch = await gitOut(folderPath, ['branch', '--show-current'])
       } catch { /* ignore */ }
       try {
-        const status = execFileSync('git', ['-C', folderPath, 'status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+        const status = await gitOut(folderPath, ['status', '--porcelain'])
         isDirty = status.length > 0
       } catch { /* ignore */ }
     }
@@ -642,7 +679,7 @@ function inspectProjectFolder(folderPath) {
 ipcMain.handle('app:init', async () => {
   await ensureEmbeddedGh().catch(() => {})
   const cfg = loadConfig()
-  const userProfile = getGhUserProfile()
+  const userProfile = await getGhUserProfileAsync()
   const shipper = userProfile ? resolveOwnShipperRepo(userProfile.login) : (cfg.shipperRepo || '')
 
   if (userProfile && shipper) {
@@ -650,14 +687,14 @@ ipcMain.handle('app:init', async () => {
       cfg.shipperRepo = shipper
       saveConfig(cfg)
     }
-    ensureUserShipperRepoExists(shipper)
+    await ensureUserShipperRepoExistsAsync(shipper)
     ensureShipperWorkflowSynced(shipper)
   }
 
   let remoteSecrets = []
   if (userProfile && shipper) {
     try {
-      remoteSecrets = JSON.parse(ghSync(['secret', 'list', '-R', shipper, '--json', 'name'])).map((x) => x.name)
+      remoteSecrets = JSON.parse(await ghAsync(['secret', 'list', '-R', shipper, '--json', 'name'])).map((x) => x.name)
     } catch { /* ignore */ }
   }
 
@@ -889,6 +926,7 @@ ipcMain.handle('accounts:googleBrowserConnect', async (_e, { label, isDefault })
 })
 
 ipcMain.handle('auth:logout', async () => {
+  _userCache = null
   const cfg = loadConfig()
   delete cfg.token
   delete cfg.licenseKey
@@ -913,10 +951,10 @@ ipcMain.handle('projects:save', async (_e, projData) => {
   let iosInfo = null
   let androidInfo = null
   if (projData.iosEnabled && projData.iosPath) {
-    iosInfo = inspectProjectFolder(projData.iosPath)
+    iosInfo = await inspectProjectFolder(projData.iosPath)
   }
   if (projData.androidEnabled && projData.androidPath) {
-    androidInfo = inspectProjectFolder(projData.androidPath)
+    androidInfo = await inspectProjectFolder(projData.androidPath)
   }
 
   const primaryInfo = iosInfo || androidInfo
@@ -967,12 +1005,12 @@ ipcMain.handle('dialog:selectFolder', async (_e, title) => {
   })
   if (res.canceled || !res.filePaths[0]) return null
   const folder = res.filePaths[0]
-  const info = inspectProjectFolder(folder)
+  const info = await inspectProjectFolder(folder)
   return { folderPath: folder, info }
 })
 
 ipcMain.handle('project:inspect', async (_e, folderPath) => {
-  return inspectProjectFolder(folderPath)
+  return await inspectProjectFolder(folderPath)
 })
 
 ipcMain.handle('dialog:selectFile', async (_e, { title, filters }) => {
@@ -987,12 +1025,19 @@ ipcMain.handle('dialog:selectFile', async (_e, { title, filters }) => {
 
 const SYNCED_HASHES = new Map()
 
+async function gitOut(folderPath, args) {
+  const { stdout } = await execFileAsync('git', ['-C', folderPath, ...args], { encoding: 'utf8', windowsHide: true, timeout: 15000 })
+  return stdout.trim()
+}
+
 function gitBlobSha(buf) {
   return crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex')
 }
 
 async function syncOneShipperFile(shipper, relPath) {
-  const buf = fs.readFileSync(path.join(SHIPPER_DIR, relPath))
+  let buf = fs.readFileSync(path.join(SHIPPER_DIR, relPath))
+  // Shell scripts must be LF-only on CI (CRLF breaks bash: "pipefail\r"), even when checked out with CRLF on Windows
+  if (relPath.endsWith('.sh')) buf = Buffer.from(buf.toString('utf8').replace(/\r\n?/g, '\n'), 'utf8')
   const localSha = gitBlobSha(buf)
   const memKey = `${shipper}:${relPath}`
   if (SYNCED_HASHES.get(memKey) === localSha) return
@@ -1274,8 +1319,8 @@ function sendShipEvent(data) {
   }
 }
 
-function syncFolderToGitHub(folderPath, user, autoSyncGit) {
-  const info = inspectProjectFolder(folderPath)
+async function syncFolderToGitHub(folderPath, user, autoSyncGit) {
+  const info = await inspectProjectFolder(folderPath)
   let targetRepo = info.gitRepo
   let targetRef = info.gitBranch || ''
 
@@ -1283,7 +1328,7 @@ function syncFolderToGitHub(folderPath, user, autoSyncGit) {
     sendShipEvent({ phase: 'sync', message: `Yerel klasör (${path.basename(folderPath)}) bulutla senkronize ediliyor...` })
 
     if (!info.hasGit) {
-      execFileSync('git', ['init', '-b', 'main'], { cwd: folderPath })
+      await gitOut(folderPath, ['init', '-b', 'main'])
       const giPath = path.join(folderPath, '.gitignore')
       if (!fs.existsSync(giPath)) {
         fs.writeFileSync(giPath, 'node_modules/\n.expo/\nbuild/\ndist/\nPods/\n*.jks\n*.p8\n*.p12\n.DS_Store\n')
@@ -1295,29 +1340,29 @@ function syncFolderToGitHub(folderPath, user, autoSyncGit) {
       targetRepo = `${user}/${repoSlug}`
       sendShipEvent({ phase: 'sync', message: `Özel bulut reposu kontrol ediliyor (${targetRepo})...` })
       try {
-        ghSync(['repo', 'view', targetRepo])
+        await ghAsync(['repo', 'view', targetRepo])
         try {
-          execFileSync('git', ['-C', folderPath, 'remote', 'add', 'origin', `https://github.com/${targetRepo}.git`])
+          await gitOut(folderPath, ['remote', 'add', 'origin', `https://github.com/${targetRepo}.git`])
         } catch {
-          execFileSync('git', ['-C', folderPath, 'remote', 'set-url', 'origin', `https://github.com/${targetRepo}.git`])
+          await gitOut(folderPath, ['remote', 'set-url', 'origin', `https://github.com/${targetRepo}.git`])
         }
       } catch {
-        execFileSync('git', ['-C', folderPath, 'add', '-A'])
-        try { execFileSync('git', ['-C', folderPath, 'commit', '-m', 'chore: initial commit via App Shipper']) } catch { /* ignore */ }
-        ghSync(['repo', 'create', targetRepo, '--private', '--source', folderPath, '--push'])
+        await gitOut(folderPath, ['add', '-A'])
+        try { await gitOut(folderPath, ['commit', '-m', 'chore: initial commit via App Shipper']) } catch { /* ignore */ }
+        await ghAsync(['repo', 'create', targetRepo, '--private', '--source', folderPath, '--push'])
       }
     }
 
-    const status = execFileSync('git', ['-C', folderPath, 'status', '--porcelain'], { encoding: 'utf8' }).trim()
+    const status = await gitOut(folderPath, ['status', '--porcelain']).trim()
     if (status.length > 0) {
       sendShipEvent({ phase: 'sync', message: 'Son değişiklikler paketleniyor...' })
-      execFileSync('git', ['-C', folderPath, 'add', '-A'])
-      execFileSync('git', ['-C', folderPath, 'commit', '-m', 'chore: ship build sync'])
+      await gitOut(folderPath, ['add', '-A'])
+      await gitOut(folderPath, ['commit', '-m', 'chore: ship build sync'])
     }
 
-    const branch = execFileSync('git', ['-C', folderPath, 'branch', '--show-current'], { encoding: 'utf8' }).trim() || 'main'
+    const branch = await gitOut(folderPath, ['branch', '--show-current']).trim() || 'main'
     sendShipEvent({ phase: 'sync', message: `'${branch}' dalı buluta aktarılıyor...` })
-    execFileSync('git', ['-C', folderPath, 'push', '-u', 'origin', branch])
+    await gitOut(folderPath, ['push', '-u', 'origin', branch])
     targetRef = branch
   }
 
@@ -1363,7 +1408,7 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   const shipper = getShipperRepo()
   if (!shipper) throw new Error('Merkezi app-shipper reposu bulunamadı. Lütfen Ayarlar sekmesinden kontrol edin.')
 
-  const user = ghSync(['api', 'user', '-q', '.login'])
+  const user = await ghAsync(['api', 'user', '-q', '.login'])
   const platforms = payload.platforms || 'both'
 
   sendShipEvent({ phase: 'trigger', message: 'Bulut Mac (Xcode) & Linux (Gradle) sunucuları hazırlanıyor...' })
@@ -1374,8 +1419,10 @@ ipcMain.handle('ship:start', async (_e, payload) => {
 
   // Eğer hem iOS hem Android gönderilecekse ve ikisi FARKLI klasörlerden alınıyorsa iki ayrı iş akışı tetiklenir
   if (platforms === 'both' && iosFolder && androidFolder && path.resolve(iosFolder) !== path.resolve(androidFolder)) {
-    const iosSync = syncFolderToGitHub(iosFolder, user, payload.autoSyncGit)
-    const andSync = syncFolderToGitHub(androidFolder, user, payload.autoSyncGit)
+    const [iosSync, andSync] = await Promise.all([
+      syncFolderToGitHub(iosFolder, user, payload.autoSyncGit),
+      syncFolderToGitHub(androidFolder, user, payload.autoSyncGit),
+    ])
     await syncPromise
 
     const iosRun = await triggerWorkflowAndFindRun(shipper, {
@@ -1437,7 +1484,7 @@ ipcMain.handle('ship:start', async (_e, payload) => {
     throw new Error('Seçilen platform için proje klasörü tanımlanmamış.')
   }
 
-  const synced = syncFolderToGitHub(targetFolder, user, payload.autoSyncGit)
+  const synced = await syncFolderToGitHub(targetFolder, user, payload.autoSyncGit)
   await syncPromise
   const run = await triggerWorkflowAndFindRun(shipper, {
     repo: synced.targetRepo,
@@ -1533,9 +1580,11 @@ ipcMain.handle('ship:pollRun', async (_e, { runIds, runId }) => {
   let anyCancelled = false
   let firstUrl = ''
 
-  for (const id of ids) {
-    const out = await ghAsync(['run', 'view', String(id), '-R', shipper, '--json', 'status,conclusion,jobs,url,createdAt'])
-    const data = JSON.parse(out)
+  // Fetch all runs in parallel instead of one after another
+  const datas = await Promise.all(ids.map(async (id) => JSON.parse(
+    await ghAsync(['run', 'view', String(id), '-R', shipper, '--json', 'status,conclusion,jobs,url,createdAt']),
+  )))
+  for (const data of datas) {
     if (!firstUrl) firstUrl = data.url
     if (data.status !== 'completed') allCompleted = false
     if (data.status === 'completed') {
