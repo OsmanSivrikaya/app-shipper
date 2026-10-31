@@ -190,16 +190,27 @@ $('formLogin').addEventListener('submit', async (e) => {
   }
 })
 
+window.shipperAPI.onWebLoginSuccess((data) => {
+  state.userProfile = data.userProfile
+  state.shipperRepo = data.shipperRepo
+  $('setShipperRepo').value = state.shipperRepo
+  applyUserProfile(data.userProfile, data.config?.licenseTier || 'PRO STUDIO')
+  $('loginPortal').classList.add('hidden')
+  $('deviceCodeBox').classList.add('hidden')
+  playSound('success')
+  showToast(`🎉 Hoş geldiniz ${data.userProfile.name}! Tarayıcıdan otomatik giriş tamamlandı.`, 'success')
+})
+
 $('btnWebOAuthLogin').addEventListener('click', async () => {
   const btn = $('btnWebOAuthLogin')
   btn.disabled = true
-  btn.textContent = '⏳ Tarayıcı açılıyor...'
+  btn.textContent = '⏳ Tarayıcı açılıyor, onay bekleniyor...'
   try {
     const res = await window.shipperAPI.startWebLogin()
     if (res.deviceCode) {
       $('deviceCodeBox').classList.remove('hidden')
       $('deviceCodeText').textContent = res.deviceCode
-      showToast('Tarayıcıda açılan sayfaya ekrandaki kodu girin, ardından Giriş Yap butonuna tıklayın.', 'info')
+      showToast(`Kod (${res.deviceCode}) panoya kopyalandı! Açılan tarayıcıda Ctrl+V yapıp onaylayın, uygulama otomatik açılacak.`, 'info')
     } else {
       await initApp()
     }
@@ -207,7 +218,7 @@ $('btnWebOAuthLogin').addEventListener('click', async () => {
     showToast(e.message, 'error')
   } finally {
     btn.disabled = false
-    btn.textContent = '🌐 GitHub Web Tarayıcısı ile Tek Tıkla Bağlan'
+    btn.textContent = '🌐 Tarayıcıdan GitHub ile Otomatik Giriş Yap'
   }
 })
 
@@ -606,14 +617,49 @@ $('formProjectKeystore').addEventListener('submit', async (e) => {
   }
 })
 
-// ─────────────────────── Apple & Google Hesap Kayıt İşlemleri ───────────────────────
+// ─────────────────────── Apple & Google Otomatik Tarayıcı Asistanı & Kayıt ───────────────────────
+
+$('btnAppleBrowserWizard').addEventListener('click', async () => {
+  const btn = $('btnAppleBrowserWizard')
+  const orig = btn.textContent
+  btn.disabled = true
+  btn.textContent = '🌐 Apple Tarayıcısı Açık — Giriş Yapıp .p8 İndirin...'
+  try {
+    const res = await window.shipperAPI.appleBrowserConnect({
+      label: $('apLabel').value,
+      isDefault: $('apIsDefault').checked,
+    })
+    if (res.p8Path) $('apP8Path').value = res.p8Path
+    if (res.keyId) $('apKeyId').value = res.keyId
+    if (res.issuerId) $('apIssuerId').value = res.issuerId
+    if (res.teamId) $('apTeamId').value = res.teamId
+
+    $('detailsAppleManual').open = true
+
+    if (res.p8Path && res.keyId && res.issuerId && res.teamId) {
+      showToast('✨ Apple bilgileri ve .p8 otomatik yakalandı! Sertifika üretilip kaydediliyor...', 'info')
+      $('formAppleAccount').requestSubmit()
+    } else if (res.p8Path || res.issuerId) {
+      showToast('✔ Tarayıcıdan bilgiler yakalandı! Eksik alan varsa kontrol edip Kaydet\'e basın.', 'success')
+    }
+  } catch (e) {
+    showToast(e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = orig
+  }
+})
 
 $('btnPickP8').addEventListener('click', async () => {
   const f = await window.shipperAPI.selectFile({
     title: 'App Store Connect .p8 Anahtarını Seçin',
     filters: [{ name: 'Apple AuthKey (.p8)', extensions: ['p8'] }],
   })
-  if (f) $('apP8Path').value = f
+  if (f) {
+    $('apP8Path').value = f
+    const m = f.match(/AuthKey_([A-Z0-9]+)\.p8/i)
+    if (m && !$('apKeyId').value) $('apKeyId').value = m[1]
+  }
 })
 
 $('formAppleAccount').addEventListener('submit', async (e) => {
@@ -643,6 +689,29 @@ $('formAppleAccount').addEventListener('submit', async (e) => {
   } finally {
     btn.disabled = false
     btn.textContent = origText
+  }
+})
+
+$('btnGoogleBrowserWizard').addEventListener('click', async () => {
+  const btn = $('btnGoogleBrowserWizard')
+  const orig = btn.textContent
+  btn.disabled = true
+  btn.textContent = '🌐 Google Tarayıcısı Açık — JSON Anahtarını İndirin...'
+  try {
+    const res = await window.shipperAPI.googleBrowserConnect({
+      label: $('gpLabel').value,
+      isDefault: $('gpIsDefault').checked,
+    })
+    if (res.jsonPath) {
+      $('gpJsonPath').value = res.jsonPath
+      showToast('✨ Google JSON anahtarı otomatik yakalandı! Hesap kaydediliyor...', 'info')
+      $('formGoogleAccount').requestSubmit()
+    }
+  } catch (e) {
+    showToast(e.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = orig
   }
 })
 

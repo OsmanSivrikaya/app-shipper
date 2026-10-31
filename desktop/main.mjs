@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, clipboard } from 'electron'
 import { execFileSync, execFile, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -488,7 +488,7 @@ ipcMain.handle('auth:loginWithToken', async (_e, { licenseKey, githubToken, ship
 ipcMain.handle('auth:startWebLogin', async () => {
   return new Promise((resolve, reject) => {
     try {
-      const child = spawn('gh', ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'], {
+      const child = spawn('gh', ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web', '-s', 'repo,workflow'], {
         stdio: ['pipe', 'pipe', 'pipe'],
       })
       let output = ''
@@ -498,8 +498,10 @@ ipcMain.handle('auth:startWebLogin', async () => {
         const codeMatch = output.match(/one-time code:\s*([A-Z0-9-]+)/i)
         if (codeMatch && !resolvedCode) {
           resolvedCode = true
+          const code = codeMatch[1]
+          try { clipboard.writeText(code) } catch { /* ignore */ }
           shell.openExternal('https://github.com/login/device')
-          resolve({ deviceCode: codeMatch[1], status: 'waiting_browser' })
+          resolve({ deviceCode: code, status: 'waiting_browser' })
         }
       }
       child.stdout.on('data', onData)
@@ -507,14 +509,152 @@ ipcMain.handle('auth:startWebLogin', async () => {
       child.stdin.write('\n')
 
       child.on('close', (code) => {
-        if (!resolvedCode) {
-          if (code === 0) resolve({ status: 'connected' })
-          else reject(new Error(output || 'GitHub Web girişi başlatılamadı.'))
+        if (code === 0) {
+          // Tarayıcıda onaylandı! Otomatik olarak oturumu ve repoyu tamamla
+          try {
+            const userProfile = getGhUserProfile()
+            if (userProfile) {
+              const cfg = loadConfig()
+              cfg.licenseKey ||= 'SHIPPER-PRO-ACTIVE'
+              cfg.licenseTier ||= 'Pro Studio'
+              const shipper = cfg.shipperRepo || `${userProfile.login}/app-shipper`
+              cfg.shipperRepo = shipper
+              try {
+                const tok = ghSync(['auth', 'token'])
+                if (tok) {
+                  cfg.token = tok
+                  setSecret(shipper, 'SOURCE_TOKEN', tok)
+                }
+              } catch { /* ignore */ }
+              saveConfig(cfg)
+              ensureShipperWorkflowSynced(shipper)
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('auth:webLoginSuccess', { config: cfg, shipperRepo: shipper, userProfile })
+              }
+            }
+          } catch { /* ignore */ }
+          if (!resolvedCode) resolve({ status: 'connected' })
+        } else if (!resolvedCode) {
+          reject(new Error(output || 'GitHub Web girişi başlatılamadı.'))
         }
       })
     } catch (e) {
       reject(e)
     }
+  })
+})
+
+// ─────────────────────── Apple & Google Otomatik Tarayıcı Asistanı ───────────────────────
+
+ipcMain.handle('accounts:appleBrowserConnect', async (_e, { label, isDefault }) => {
+  return new Promise((resolve) => {
+    const ascWin = new BrowserWindow({
+      width: 1120,
+      height: 780,
+      title: 'Apple App Store Connect — Giriş Yapın ve API Anahtarını İndirin (.p8)',
+      autoHideMenuBar: true,
+    })
+
+    let capturedP8Path = ''
+    let capturedKeyId = ''
+    let capturedIssuerId = ''
+    let capturedTeamId = ''
+
+    // Sayfa yüklendikçe Issuer ID ve Key ID'yi DOM'dan otomatik yakalamayı dene
+    const scanTimer = setInterval(async () => {
+      if (ascWin.isDestroyed()) {
+        clearInterval(scanTimer)
+        return
+      }
+      try {
+        const text = await ascWin.webContents.executeJavaScript(`document.body ? document.body.innerText : ''`)
+        const uuidMatch = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+        if (uuidMatch && !capturedIssuerId) capturedIssuerId = uuidMatch[0]
+        const teamMatch = text.match(/\b([A-Z0-9]{10})\b/)
+        if (teamMatch && !capturedTeamId) capturedTeamId = teamMatch[1]
+      } catch { /* ignore */ }
+    }, 2000)
+
+    // Kullanıcı .p8 dosyasını indirdiğinde otomatik yakala!
+    ascWin.webContents.session.on('will-download', (_event, item) => {
+      const fileName = item.getFilename()
+      if (fileName.endsWith('.p8')) {
+        const saveDir = path.join(HOME_DIR, 'downloads')
+        fs.mkdirSync(saveDir, { recursive: true })
+        const savePath = path.join(saveDir, fileName)
+        item.setSavePath(savePath)
+
+        const m = fileName.match(/AuthKey_([A-Z0-9]+)\.p8/i)
+        if (m) capturedKeyId = m[1]
+
+        item.once('done', (_ev, state) => {
+          if (state === 'completed') {
+            capturedP8Path = savePath
+            clearInterval(scanTimer)
+            setTimeout(() => {
+              if (!ascWin.isDestroyed()) ascWin.close()
+            }, 600)
+          }
+        })
+      }
+    })
+
+    ascWin.on('closed', () => {
+      clearInterval(scanTimer)
+      resolve({
+        label: label || 'Apple Hesabım',
+        isDefault: Boolean(isDefault),
+        p8Path: capturedP8Path,
+        keyId: capturedKeyId,
+        issuerId: capturedIssuerId,
+        teamId: capturedTeamId,
+      })
+    })
+
+    ascWin.loadURL('https://appstoreconnect.apple.com/access/integrations/api')
+  })
+})
+
+ipcMain.handle('accounts:googleBrowserConnect', async (_e, { label, isDefault }) => {
+  return new Promise((resolve) => {
+    const gcpWin = new BrowserWindow({
+      width: 1120,
+      height: 780,
+      title: 'Google Cloud Console — Giriş Yapın ve Service Account JSON Anahtarını İndirin',
+      autoHideMenuBar: true,
+    })
+
+    let capturedJsonPath = ''
+
+    // Kullanıcı .json anahtarını indirdiği anda otomatik yakala ve hesabı kur!
+    gcpWin.webContents.session.on('will-download', (_event, item) => {
+      const fileName = item.getFilename()
+      if (fileName.endsWith('.json')) {
+        const saveDir = path.join(HOME_DIR, 'downloads')
+        fs.mkdirSync(saveDir, { recursive: true })
+        const savePath = path.join(saveDir, fileName)
+        item.setSavePath(savePath)
+
+        item.once('done', (_ev, state) => {
+          if (state === 'completed') {
+            capturedJsonPath = savePath
+            setTimeout(() => {
+              if (!gcpWin.isDestroyed()) gcpWin.close()
+            }, 600)
+          }
+        })
+      }
+    })
+
+    gcpWin.on('closed', () => {
+      resolve({
+        label: label || 'Google Play Hesabım',
+        isDefault: Boolean(isDefault),
+        jsonPath: capturedJsonPath,
+      })
+    })
+
+    gcpWin.loadURL('https://console.cloud.google.com/iam-admin/serviceaccounts')
   })
 })
 

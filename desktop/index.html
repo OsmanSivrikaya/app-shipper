@@ -72,41 +72,46 @@
       <div class="login-right">
         <div class="login-card">
           <h2>Stüdyoya Giriş Yap</h2>
-          <p class="subtitle">Lisans anahtarınız ve GitHub bulut hesabınızla oturum açın.</p>
+          <p class="subtitle">Tek tıkla tarayıcı üzerinden GitHub bulut hesabınızla oturum açın.</p>
 
-          <form id="formLogin" class="mt-16">
-            <div class="form-group">
-              <label>Lisans Anahtarı (Pro / Enterprise)</label>
-              <input type="text" id="loginLicenseKey" placeholder="SHIPPER-PRO-XXXX-XXXX" value="SHIPPER-PRO-2026-VIP" />
-            </div>
-
-            <div class="form-group">
-              <label>GitHub Fine-Grained / Personal Access Token</label>
-              <input type="password" id="loginGithubToken" placeholder="ghp_... veya github_pat_... (Mevcut gh oturumu varsa boş bırakın)" />
-              <span class="field-hint">
-                Token oluşturmak için: <a href="#" id="linkCreateToken">github.com/settings/tokens</a> (Repo &amp; Workflow yetkisi)
-              </span>
-            </div>
-
-            <div class="form-group">
-              <label>Merkezi Bulut Motoru Reposu</label>
-              <input type="text" id="loginShipperRepo" placeholder="app-shipper (Otomatik oluşturulur)" value="app-shipper" />
-            </div>
-
-            <button type="submit" class="btn btn-primary w-full btn-lg mt-8" id="btnSubmitLogin">
-              🚀 Stüdyoyu Etkinleştir ve Giriş Yap
-            </button>
-          </form>
-
-          <div class="or-divider"><span>VEYA</span></div>
-
-          <button type="button" class="btn btn-secondary w-full" id="btnWebOAuthLogin">
-            🌐 GitHub Web Tarayıcısı ile Tek Tıkla Bağlan
+          <button type="button" class="btn btn-primary w-full btn-lg mt-16" id="btnWebOAuthLogin">
+            🌐 Tarayıcıdan GitHub ile Otomatik Giriş Yap
           </button>
+
           <div id="deviceCodeBox" class="device-code-box hidden">
-            <span>Tarayıcıda bu kodu girin:</span>
-            <strong id="deviceCodeText">----</strong>
+            <div>
+              <div style="font-size:11.5px;color:#94a3b8">Kod panoya otomatik kopyalandı! Açılan pencerede yapıştırın (Ctrl+V):</div>
+              <strong id="deviceCodeText">----</strong>
+            </div>
+            <span class="step-spinner"></span>
           </div>
+
+          <details class="advanced-details mt-16">
+            <summary>Gelişmiş: Lisans Anahtarı veya Token ile Manuel Giriş</summary>
+            <form id="formLogin" class="mt-12">
+              <div class="form-group">
+                <label>Lisans Anahtarı (Pro / Enterprise)</label>
+                <input type="text" id="loginLicenseKey" placeholder="SHIPPER-PRO-XXXX-XXXX" value="SHIPPER-PRO-2026-VIP" />
+              </div>
+
+              <div class="form-group">
+                <label>GitHub Fine-Grained / Personal Access Token</label>
+                <input type="password" id="loginGithubToken" placeholder="ghp_... veya github_pat_..." />
+                <span class="field-hint">
+                  Token oluşturmak için: <a href="#" id="linkCreateToken">github.com/settings/tokens</a>
+                </span>
+              </div>
+
+              <div class="form-group">
+                <label>Merkezi Bulut Motoru Reposu</label>
+                <input type="text" id="loginShipperRepo" placeholder="app-shipper (Otomatik oluşturulur)" value="app-shipper" />
+              </div>
+
+              <button type="submit" class="btn btn-secondary w-full mt-8" id="btnSubmitLogin">
+                🔑 Token ile Giriş Yap
+              </button>
+            </form>
+          </details>
         </div>
       </div>
     </div>
@@ -359,106 +364,122 @@
           <div class="card">
             <div class="section-title-row">
               <h3>🍎 Apple Developer Hesapları</h3>
-              <span class="badge">App Store Connect API</span>
+              <span class="badge">Otomatik Asistan</span>
             </div>
             <p class="help-text">
-              <code>appstoreconnect.apple.com</code> &rarr; Users and Access &rarr; Integrations &rarr; Team Keys &rarr; <strong>+</strong> (Admin)
+              Tarayıcıdan Apple hesabınıza giriş yapın; indirdiğiniz <code>.p8</code> anahtarı ve ID'ler <strong>otomatik yakalanır</strong>.
             </p>
 
             <div id="appleProfilesList" class="profiles-list"></div>
 
-            <form id="formAppleAccount" class="account-form">
-              <h4>+ Yeni Apple Hesabı Ekle</h4>
+            <div class="account-form">
               <div class="form-group">
                 <label>Hesap / Profil Adı</label>
-                <input type="text" id="apLabel" placeholder="Örn: Ana Apple Hesabım, Müşteri X" required />
+                <input type="text" id="apLabel" placeholder="Örn: Ana Apple Hesabım, Müşteri X" value="Ana Apple Hesabım" />
               </div>
-              <div class="form-grid-2">
-                <div class="form-group">
-                  <label>Key ID</label>
-                  <input type="text" id="apKeyId" placeholder="2X9R4H..." required />
-                </div>
-                <div class="form-group">
-                  <label>Team ID</label>
-                  <input type="text" id="apTeamId" placeholder="8A7B6C..." required />
-                </div>
-              </div>
-              <div class="form-group">
-                <label>Issuer ID</label>
-                <input type="text" id="apIssuerId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required />
-              </div>
-              <div class="form-group">
-                <label>.p8 Özel Anahtar Dosyası</label>
-                <div class="file-input-row">
-                  <input type="text" id="apP8Path" placeholder="AuthKey_XXXX.p8 seçin..." readonly required />
-                  <button type="button" class="btn btn-secondary" id="btnPickP8">Seç</button>
-                </div>
-              </div>
-              <label class="checkbox-label">
-                <input type="checkbox" id="apIsDefault" />
-                <span>Varsayılan Apple hesabı yap</span>
-              </label>
-              <button type="submit" class="btn btn-primary w-full mt-12" id="btnSaveApple">
-                🍎 Sertifika Üret ve Apple Hesabını Kaydet
+
+              <button type="button" class="btn btn-primary w-full btn-lg mt-4" id="btnAppleBrowserWizard">
+                🌐 Apple ile Tarayıcıdan Giriş Yap &amp; Otomatik Yakala
               </button>
-            </form>
+
+              <form id="formAppleAccount" class="mt-12">
+                <details class="advanced-details" id="detailsAppleManual">
+                  <summary>Veya Bilgileri Manuel Kontrol Et / Dosyadan Seç</summary>
+                  <div class="form-grid-2 mt-10">
+                    <div class="form-group">
+                      <label>Key ID (.p8 dosya adından otomatik bulunur)</label>
+                      <input type="text" id="apKeyId" placeholder="2X9R4H..." required />
+                    </div>
+                    <div class="form-group">
+                      <label>Team ID</label>
+                      <input type="text" id="apTeamId" placeholder="8A7B6C..." required />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Issuer ID</label>
+                    <input type="text" id="apIssuerId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required />
+                  </div>
+                  <div class="form-group">
+                    <label>.p8 Özel Anahtar Dosyası</label>
+                    <div class="file-input-row">
+                      <input type="text" id="apP8Path" placeholder="AuthKey_XXXX.p8 seçin..." readonly required />
+                      <button type="button" class="btn btn-secondary" id="btnPickP8">Seç</button>
+                    </div>
+                  </div>
+                </details>
+
+                <label class="checkbox-label mt-10">
+                  <input type="checkbox" id="apIsDefault" checked />
+                  <span>Varsayılan Apple hesabı yap</span>
+                </label>
+                <button type="submit" class="btn btn-secondary w-full mt-10" id="btnSaveApple">
+                  🍎 Sertifika Üret ve Apple Hesabını Kaydet
+                </button>
+              </form>
+            </div>
           </div>
 
           <!-- GOOGLE -->
           <div class="card">
             <div class="section-title-row">
               <h3>🤖 Google Play Hesapları</h3>
-              <span class="badge">Service Account JSON</span>
+              <span class="badge">Otomatik Asistan</span>
             </div>
             <p class="help-text">
-              Google Cloud &rarr; Service Accounts &rarr; Keys &rarr; Add Key (JSON). Play Console'da <strong>Sürümleri yönet</strong> yetkisi verin.
+              Tarayıcıdan Google Cloud hesabınıza giriş yapıp JSON anahtarını indirdiğiniz anda <strong>otomatik yakalanıp kaydedilir</strong>.
             </p>
 
             <div id="googleProfilesList" class="profiles-list"></div>
 
-            <form id="formGoogleAccount" class="account-form">
-              <h4>+ Yeni Google Play Hesabı Ekle</h4>
+            <div class="account-form">
               <div class="form-group">
                 <label>Hesap / Profil Adı</label>
-                <input type="text" id="gpLabel" placeholder="Örn: Oyun Stüdyosu Play, Kurumsal Play" required />
-              </div>
-              <div class="form-group">
-                <label>Service Account JSON Dosyası</label>
-                <div class="file-input-row">
-                  <input type="text" id="gpJsonPath" placeholder="service-account.json seçin..." readonly required />
-                  <button type="button" class="btn btn-secondary" id="btnPickPlayJson">Seç</button>
-                </div>
+                <input type="text" id="gpLabel" placeholder="Örn: Ana Google Play Hesabım" value="Ana Google Play Hesabım" />
               </div>
 
-              <details class="advanced-details mt-8">
-                <summary>Özel Upload Keystore (.jks) Kullan (Boşsa otomatik üretilir)</summary>
-                <div class="form-group mt-8">
-                  <label>Keystore (.jks) Dosyası</label>
-                  <div class="file-input-row">
-                    <input type="text" id="gpJksPath" placeholder="Otomatik üretilecek..." readonly />
-                    <button type="button" class="btn btn-secondary" id="btnPickGoogleJks">Seç</button>
-                  </div>
-                </div>
-                <div class="form-grid-2">
-                  <div class="form-group">
-                    <label>Key Alias</label>
-                    <input type="text" id="gpKeyAlias" placeholder="upload" />
-                  </div>
-                  <div class="form-group">
-                    <label>Keystore Şifresi</label>
-                    <input type="password" id="gpStorePass" placeholder="••••••" />
-                  </div>
-                </div>
-              </details>
-
-              <label class="checkbox-label mt-8">
-                <input type="checkbox" id="gpIsDefault" />
-                <span>Varsayılan Google Play hesabı yap</span>
-              </label>
-              <button type="submit" class="btn btn-success w-full mt-12" id="btnSaveGoogle">
-                🤖 Google Play Hesabını Kaydet
+              <button type="button" class="btn btn-success w-full btn-lg mt-4" id="btnGoogleBrowserWizard">
+                🌐 Google ile Tarayıcıdan Giriş Yap &amp; Otomatik Bağla
               </button>
-            </form>
+
+              <form id="formGoogleAccount" class="mt-12">
+                <details class="advanced-details" id="detailsGoogleManual">
+                  <summary>Veya Bilgisayardaki JSON / Keystore Dosyasını Seç</summary>
+                  <div class="form-group mt-10">
+                    <label>Service Account JSON Dosyası</label>
+                    <div class="file-input-row">
+                      <input type="text" id="gpJsonPath" placeholder="service-account.json seçin..." readonly required />
+                      <button type="button" class="btn btn-secondary" id="btnPickPlayJson">Seç</button>
+                    </div>
+                  </div>
+
+                  <div class="form-group mt-8">
+                    <label>Özel Keystore (.jks) Dosyası (Boşsa otomatik üretilir)</label>
+                    <div class="file-input-row">
+                      <input type="text" id="gpJksPath" placeholder="Otomatik üretilecek..." readonly />
+                      <button type="button" class="btn btn-secondary" id="btnPickGoogleJks">Seç</button>
+                    </div>
+                  </div>
+                  <div class="form-grid-2">
+                    <div class="form-group">
+                      <label>Key Alias</label>
+                      <input type="text" id="gpKeyAlias" placeholder="upload" />
+                    </div>
+                    <div class="form-group">
+                      <label>Keystore Şifresi</label>
+                      <input type="password" id="gpStorePass" placeholder="••••••" />
+                    </div>
+                  </div>
+                </details>
+
+                <label class="checkbox-label mt-10">
+                  <input type="checkbox" id="gpIsDefault" checked />
+                  <span>Varsayılan Google Play hesabı yap</span>
+                </label>
+                <button type="submit" class="btn btn-secondary w-full mt-10" id="btnSaveGoogle">
+                  🤖 Google Play Hesabını Kaydet
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </section>

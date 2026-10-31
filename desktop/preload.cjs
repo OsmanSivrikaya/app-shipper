@@ -18,9 +18,11 @@ contextBridge.exposeInMainWorld('shipperAPI', {
   inspectProject: (folderPath) => ipcRenderer.invoke('project:inspect', folderPath),
   selectFile: (opts) => ipcRenderer.invoke('dialog:selectFile', opts),
 
+  appleBrowserConnect: (payload) => ipcRenderer.invoke('accounts:appleBrowserConnect', payload),
   saveAppleAccount: (payload) => ipcRenderer.invoke('accounts:saveApple', payload),
   deleteAppleAccount: (id) => ipcRenderer.invoke('accounts:deleteApple', id),
 
+  googleBrowserConnect: (payload) => ipcRenderer.invoke('accounts:googleBrowserConnect', payload),
   saveGoogleAccount: (payload) => ipcRenderer.invoke('accounts:saveGoogle', payload),
   deleteGoogleAccount: (id) => ipcRenderer.invoke('accounts:deleteGoogle', id),
 
@@ -40,5 +42,11 @@ contextBridge.exposeInMainWorld('shipperAPI', {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('ship:event', handler)
     return () => ipcRenderer.removeListener('ship:event', handler)
+  },
+
+  onWebLoginSuccess: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('auth:webLoginSuccess', handler)
+    return () => ipcRenderer.removeListener('auth:webLoginSuccess', handler)
   },
 })
