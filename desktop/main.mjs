@@ -1217,8 +1217,21 @@ async function triggerWorkflowAndFindRun(shipper, fields) {
   return run
 }
 
+function recordRunMeta(runId, info) {
+  if (!runId) return
+  try {
+    const cfg = loadConfig()
+    cfg.runMeta = cfg.runMeta || {}
+    cfg.runMeta[String(runId)] = {
+      ...info,
+      recordedAt: new Date().toISOString(),
+    }
+    saveConfig(cfg)
+  } catch { /* ignore */ }
+}
+
 ipcMain.handle('ship:start', async (_e, payload) => {
-  // payload: { iosPath, androidPath, platforms, version, ref, appSubPath, androidTrack, isDraft, appleProfile, googleProfile, autoSyncGit }
+  // payload: { projectId, projectName, iosPath, androidPath, platforms, version, ref, appSubPath, androidTrack, isDraft, appleProfile, googleProfile, autoSyncGit }
   const shipper = getShipperRepo()
   if (!shipper) throw new Error('Merkezi app-shipper reposu bulunamadı. Lütfen Ayarlar sekmesinden kontrol edin.')
 
@@ -1261,6 +1274,25 @@ ipcMain.handle('ship:start', async (_e, payload) => {
       google_profile: payload.googleProfile || '',
     })
 
+    if (iosRun?.databaseId) {
+      recordRunMeta(iosRun.databaseId, {
+        projectId: payload.projectId || '',
+        projectName: payload.projectName || '',
+        repo: iosSync.targetRepo,
+        platforms: 'ios',
+        version: payload.version || '',
+      })
+    }
+    if (andRun?.databaseId) {
+      recordRunMeta(andRun.databaseId, {
+        projectId: payload.projectId || '',
+        projectName: payload.projectName || '',
+        repo: andSync.targetRepo,
+        platforms: 'android',
+        version: payload.version || '',
+      })
+    }
+
     const runIds = [iosRun?.databaseId, andRun?.databaseId].filter(Boolean)
     return {
       runIds,
@@ -1294,6 +1326,14 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   if (!run) {
     throw new Error(`Derleme başlatıldı ancak takip ID'si alınamadı: https://github.com/${shipper}/actions`)
   }
+
+  recordRunMeta(run.databaseId, {
+    projectId: payload.projectId || '',
+    projectName: payload.projectName || '',
+    repo: synced.targetRepo,
+    platforms,
+    version: payload.version || '',
+  })
 
   return {
     runIds: [run.databaseId],
@@ -1440,8 +1480,65 @@ ipcMain.handle('ship:history', async () => {
   const shipper = getShipperRepo()
   if (!shipper) return []
   try {
-    const out = await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '20', '--json', 'databaseId,displayTitle,status,conclusion,createdAt,updatedAt,url,headBranch'])
-    return JSON.parse(out)
+    const out = await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '100', '--json', 'databaseId,displayTitle,status,conclusion,createdAt,updatedAt,url,headBranch'])
+    const rawList = JSON.parse(out)
+    const cfg = loadConfig()
+    const runMeta = cfg.runMeta || {}
+    const projects = cfg.projects || []
+
+    return rawList.map((r) => {
+      const meta = runMeta[String(r.databaseId)] || {}
+      const title = String(r.displayTitle || '')
+
+      // Platform tahmini
+      let platforms = meta.platforms || ''
+      if (!platforms) {
+        if (/\[ios\]|\bios\b/i.test(title) && !/\bandroid\b/i.test(title)) platforms = 'ios'
+        else if (/\[android\]|\bandroid\b/i.test(title) && !/\bios\b/i.test(title)) platforms = 'android'
+        else if (/\[both\]|\bboth\b/i.test(title)) platforms = 'both'
+      }
+
+      // Proje tahmini
+      let projectName = meta.projectName || ''
+      let projectId = meta.projectId || ''
+      if (!projectName) {
+        const matchedProj = projects.find((p) => {
+          const pName = (p.name || '').toLowerCase()
+          const iosFolder = path.basename(p.iosPath || '').toLowerCase()
+          const andFolder = path.basename(p.androidPath || '').toLowerCase()
+          const lowTitle = title.toLowerCase()
+          return (pName && lowTitle.includes(pName)) || (iosFolder && lowTitle.includes(iosFolder)) || (andFolder && lowTitle.includes(andFolder))
+        })
+        if (matchedProj) {
+          projectName = matchedProj.name
+          projectId = matchedProj.id
+        } else if (projects.length === 1) {
+          projectName = projects[0].name
+          projectId = projects[0].id
+        }
+      }
+
+      // Sürüm tahmini
+      let version = meta.version || ''
+      if (!version) {
+        const verMatch = title.match(/\b(\d+\.\d+\.\d+(?:\+\d+)?)\b/)
+        if (verMatch) version = verMatch[1]
+      }
+
+      const durationSec = r.createdAt && r.updatedAt
+        ? Math.max(0, Math.round((Date.parse(r.updatedAt) - Date.parse(r.createdAt)) / 1000))
+        : 0
+
+      return {
+        ...r,
+        projectName: projectName || 'Proje',
+        projectId,
+        platforms: platforms || 'both',
+        version,
+        repo: meta.repo || '',
+        durationSec,
+      }
+    })
   } catch {
     return []
   }

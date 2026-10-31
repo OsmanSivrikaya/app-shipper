@@ -563,15 +563,82 @@
         <div class="page-top">
           <div>
             <h1>Geçmiş Gönderimler</h1>
-            <p class="text-muted">Son yapılan derleme ve mağaza yükleme işlemleri. Aktif işlemleri buradan da izleyebilirsiniz.</p>
+            <p class="text-muted">Proje, platform, durum ve tarihe göre gönderimleri filtreleyin, sıralayın veya canlı takip edin.</p>
           </div>
           <button class="btn btn-secondary" id="btnRefreshHistory">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             <span>Yenile</span>
           </button>
         </div>
-        <div class="panel-box mt-16">
+
+        <!-- Filtre & Sıralama Çubuğu -->
+        <div class="panel-box mt-12 history-toolbar-box">
+          <div class="history-filters-grid">
+            <div class="field">
+              <label>Arama</label>
+              <input type="text" id="histSearch" placeholder="Proje, sürüm veya #ID ara..." />
+            </div>
+            <div class="field">
+              <label>Proje</label>
+              <select id="histProjectFilter">
+                <option value="all">Tüm Projeler</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Platform</label>
+              <select id="histPlatformFilter">
+                <option value="all">Tüm Platformlar</option>
+                <option value="ios">iOS (App Store)</option>
+                <option value="android">Android (Google Play)</option>
+                <option value="both">Her İkisi (Both)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Durum</label>
+              <select id="histStatusFilter">
+                <option value="all">Tüm Durumlar</option>
+                <option value="success">Başarılı</option>
+                <option value="failure">Hatalı</option>
+                <option value="running">Derleniyor</option>
+                <option value="cancelled">İptal Edildi</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Tarih Aralığı</label>
+              <select id="histDateFilter">
+                <option value="all">Tüm Zamanlar</option>
+                <option value="today">Bugün</option>
+                <option value="7d">Son 7 Gün</option>
+                <option value="30d">Son 30 Gün</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Sıralama</label>
+              <select id="histSortOrder">
+                <option value="date_desc">Tarih (En Yeni)</option>
+                <option value="date_asc">Tarih (En Eski)</option>
+                <option value="proj_asc">Proje Adı (A → Z)</option>
+                <option value="proj_desc">Proje Adı (Z → A)</option>
+                <option value="dur_desc">Süre (En Uzun)</option>
+                <option value="dur_asc">Süre (En Kısa)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-box mt-12">
           <div id="historyTableContainer"></div>
+          <div id="historyPaginationBar" class="history-pagination hidden">
+            <div class="hist-page-info" id="histPageInfo">Toplam 0 kayıt</div>
+            <div class="hist-page-controls">
+              <select id="histPageSize" class="hist-size-select" title="Sayfa başına kayıt">
+                <option value="8">8 / sayfa</option>
+                <option value="15">15 / sayfa</option>
+                <option value="30">30 / sayfa</option>
+              </select>
+              <div id="histPageButtons" class="hist-page-btns"></div>
+            </div>
+          </div>
         </div>
       </section>
 

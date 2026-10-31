@@ -1087,6 +1087,8 @@ async function startShipping(platforms) {
 
   try {
     const res = await window.shipperAPI.startShip({
+      projectId: curProj?.id || '',
+      projectName: curProj?.name || '',
       iosPath,
       androidPath,
       platforms,
@@ -1180,84 +1182,220 @@ $('btnOpenRunUrl').addEventListener('click', () => {
   if (state.activeRunUrl) window.shipperAPI.openExternal(state.activeRunUrl)
 })
 
-// Geçmiş
+// Geçmiş (Filtreleme, Sıralama ve Sayfalama)
+state.historyList = []
+state.historyPage = 1
+
+function populateHistoryProjectDropdown() {
+  const sel = $('histProjectFilter')
+  if (!sel) return
+  const currentVal = sel.value || 'all'
+  const projNames = new Set()
+  for (const p of state.projects || []) {
+    if (p.name) projNames.add(p.name)
+  }
+  for (const r of state.historyList || []) {
+    if (r.projectName && r.projectName !== 'Proje') projNames.add(r.projectName)
+  }
+  sel.innerHTML = `<option value="all">Tüm Projeler</option>` +
+    Array.from(projNames).map((name) => `<option value="${name}">${name}</option>`).join('')
+  if (Array.from(projNames).includes(currentVal)) sel.value = currentVal
+}
+
+function getFilteredAndSortedHistory() {
+  const q = ($('histSearch')?.value || '').trim().toLowerCase()
+  const projFilter = $('histProjectFilter')?.value || 'all'
+  const platFilter = $('histPlatformFilter')?.value || 'all'
+  const statusFilter = $('histStatusFilter')?.value || 'all'
+  const dateFilter = $('histDateFilter')?.value || 'all'
+  const sortOrder = $('histSortOrder')?.value || 'date_desc'
+  const now = Date.now()
+
+  const filtered = (state.historyList || []).filter((r) => {
+    const isRunning = r.status !== 'completed'
+    const runStatus = isRunning ? 'running' : (r.conclusion || 'failure')
+
+    if (projFilter !== 'all' && r.projectName !== projFilter) return false
+    if (platFilter !== 'all' && r.platforms !== platFilter) return false
+    if (statusFilter !== 'all' && runStatus !== statusFilter) return false
+
+    if (dateFilter !== 'all' && r.createdAt) {
+      const createdMs = Date.parse(r.createdAt)
+      const diffHours = (now - createdMs) / (1000 * 3600)
+      if (dateFilter === 'today' && diffHours > 24) return false
+      if (dateFilter === '7d' && diffHours > 24 * 7) return false
+      if (dateFilter === '30d' && diffHours > 24 * 30) return false
+    }
+
+    if (q) {
+      const hay = `${r.projectName || ''} ${r.displayTitle || ''} ${r.version || ''} ${r.databaseId || ''} ${r.platforms || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
+  filtered.sort((a, b) => {
+    if (sortOrder === 'date_asc') return Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0)
+    if (sortOrder === 'proj_asc') return String(a.projectName || '').localeCompare(String(b.projectName || ''), 'tr')
+    if (sortOrder === 'proj_desc') return String(b.projectName || '').localeCompare(String(a.projectName || ''), 'tr')
+    if (sortOrder === 'dur_desc') return (b.durationSec || 0) - (a.durationSec || 0)
+    if (sortOrder === 'dur_asc') return (a.durationSec || 0) - (b.durationSec || 0)
+    return Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)
+  })
+
+  return filtered
+}
+
+function renderHistoryTable() {
+  const container = $('historyTableContainer')
+  const pageBar = $('historyPaginationBar')
+  if (!container) return
+
+  const filtered = getFilteredAndSortedHistory()
+  const pageSize = parseInt($('histPageSize')?.value || '8', 10)
+  const totalItems = filtered.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
+  if (state.historyPage > totalPages) state.historyPage = totalPages
+  if (state.historyPage < 1) state.historyPage = 1
+
+  if (!totalItems) {
+    container.innerHTML = `<div class="empty-hint">Seçilen filtrelere uygun gönderim kaydı bulunamadı.</div>`
+    pageBar?.classList.add('hidden')
+    return
+  }
+
+  const startIdx = (state.historyPage - 1) * pageSize
+  const pageItems = filtered.slice(startIdx, startIdx + pageSize)
+
+  container.innerHTML = pageItems.map((r) => {
+    const isRunning = r.status !== 'completed'
+    const isOk = r.conclusion === 'success'
+    const isCancelled = r.conclusion === 'cancelled'
+    const dotClass = isRunning ? 'running' : (isOk ? 'success' : (isCancelled ? 'cancelled' : 'failure'))
+    const statusLabel = isRunning ? 'Derleniyor' : (isOk ? 'Başarılı' : (isCancelled ? 'İptal Edildi' : 'Hatalı'))
+    const dateStr = new Date(r.createdAt).toLocaleString('tr-TR')
+    const durText = r.durationSec > 0 ? ` &middot; Süre: ${formatSec(r.durationSec)}` : ''
+
+    let platBadge = `<span class="hist-badge plat-both">iOS + Android</span>`
+    if (r.platforms === 'ios') platBadge = `<span class="hist-badge plat-ios">&#63743; iOS · TestFlight</span>`
+    else if (r.platforms === 'android') platBadge = `<span class="hist-badge plat-android">Android · Play</span>`
+
+    const verBadge = r.version ? `<span class="hist-badge ver">v${r.version}</span>` : ''
+
+    return `
+      <div class="history-row">
+        <div>
+          <div class="history-title">
+            <span class="status-dot ${dotClass}"></span>
+            <div class="hist-tags">
+              <span class="hist-badge proj">${r.projectName || 'Proje'}</span>
+              ${platBadge}
+              ${verBadge}
+              <span>${r.displayTitle}</span>
+            </div>
+          </div>
+          <div class="history-sub">${dateStr} &middot; <strong>${statusLabel}</strong>${durText} &middot; <span class="text-muted">#${r.databaseId}</span></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0">
+          ${isRunning ? `<button class="btn btn-xs btn-danger" data-cancel-run="${r.databaseId}">Durdur</button>` : ''}
+          ${isRunning ? `<button class="btn btn-xs btn-primary" data-watch-run="${r.databaseId}" data-watch-url="${r.url}" data-watch-plat="${r.platforms || 'both'}">Canlı İzle</button>` : ''}
+          <button class="btn btn-xs btn-secondary" data-open-url="${r.url}">GitHub'da Aç</button>
+        </div>
+      </div>
+    `
+  }).join('')
+
+  // Sayfalama çubuğunu güncelle
+  if (pageBar) {
+    pageBar.classList.remove('hidden')
+    const endIdx = Math.min(totalItems, startIdx + pageSize)
+    $('histPageInfo').textContent = `Toplam ${totalItems} gönderimden ${startIdx + 1}–${endIdx} arası gösteriliyor`
+
+    const btns = []
+    btns.push(`<button class="page-btn" data-hist-page="${state.historyPage - 1}" ${state.historyPage <= 1 ? 'disabled' : ''}>&laquo; Önceki</button>`)
+    for (let p = 1; p <= totalPages; p++) {
+      if (totalPages <= 7 || p === 1 || p === totalPages || Math.abs(p - state.historyPage) <= 1) {
+        btns.push(`<button class="page-btn ${p === state.historyPage ? 'active' : ''}" data-hist-page="${p}">${p}</button>`)
+      } else if (btns[btns.length - 1] !== `<span class="text-muted" style="padding:0 4px">…</span>`) {
+        btns.push(`<span class="text-muted" style="padding:0 4px">…</span>`)
+      }
+    }
+    btns.push(`<button class="page-btn" data-hist-page="${state.historyPage + 1}" ${state.historyPage >= totalPages ? 'disabled' : ''}>Sonraki &raquo;</button>`)
+    $('histPageButtons').innerHTML = btns.join('')
+
+    $('histPageButtons').querySelectorAll('[data-hist-page]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const targetPage = parseInt(b.dataset.histPage, 10)
+        if (targetPage >= 1 && targetPage <= totalPages) {
+          state.historyPage = targetPage
+          renderHistoryTable()
+        }
+      })
+    })
+  }
+
+  container.querySelectorAll('[data-open-url]').forEach((btn) => {
+    btn.addEventListener('click', () => window.shipperAPI.openExternal(btn.dataset.openUrl))
+  })
+
+  container.querySelectorAll('[data-cancel-run]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true
+      btn.textContent = '...'
+      try {
+        await window.shipperAPI.cancelRun({ runId: btn.dataset.cancelRun })
+        showToast('Derleme durduruldu', 'info')
+        setTimeout(loadHistoryList, 1200)
+      } catch (e) {
+        showToast(e.message, 'error')
+        btn.disabled = false
+        btn.textContent = 'Durdur'
+      }
+    })
+  })
+
+  container.querySelectorAll('[data-watch-run]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.activeRunIds = [btn.dataset.watchRun]
+      state.activeRunUrl = btn.dataset.watchUrl
+      openLoadingOverlay(btn.dataset.watchPlat || 'both')
+      if (state.pollTimer) clearInterval(state.pollTimer)
+      state.pollTimer = setInterval(async () => {
+        const runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
+        renderLiveJobs(runData)
+        if (runData.status === 'completed') {
+          state.isBuildRunning = false
+          clearInterval(state.pollTimer)
+          clearInterval(state.elapsedTimer)
+          window.shipperAPI.setProgress(-1)
+          setCancelButtonsVisible(false)
+        }
+      }, 3000)
+    })
+  })
+}
+
 async function loadHistoryList() {
   const container = $('historyTableContainer')
   container.innerHTML = `<div class="empty-hint">Yükleniyor...</div>`
   try {
-    const list = await window.shipperAPI.getHistory()
-    if (!list.length) {
-      container.innerHTML = `<div class="empty-hint">Henüz gönderim geçmişi yok.</div>`
-      return
-    }
-    container.innerHTML = list.map((r) => {
-      const isRunning = r.status !== 'completed'
-      const isOk = r.conclusion === 'success'
-      const isCancelled = r.conclusion === 'cancelled'
-      const dotClass = isRunning ? 'running' : (isOk ? 'success' : 'failure')
-      const statusLabel = isRunning ? 'Derleniyor' : (isOk ? 'Başarılı' : (isCancelled ? 'İptal Edildi' : 'Hatalı'))
-      const dateStr = new Date(r.createdAt).toLocaleString('tr-TR')
-      return `
-        <div class="history-row">
-          <div>
-            <div class="history-title">
-              <span class="status-dot ${dotClass}"></span>
-              <span>${r.displayTitle}</span>
-            </div>
-            <div class="history-sub">${dateStr} &middot; ${statusLabel}</div>
-          </div>
-          <div style="display:flex;gap:8px">
-            ${isRunning ? `<button class="btn btn-xs btn-danger" data-cancel-run="${r.databaseId}">Durdur</button>` : ''}
-            ${isRunning ? `<button class="btn btn-xs btn-primary" data-watch-run="${r.databaseId}" data-watch-url="${r.url}">Canlı İzle</button>` : ''}
-            <button class="btn btn-xs btn-secondary" data-open-url="${r.url}">GitHub'da Aç</button>
-          </div>
-        </div>
-      `
-    }).join('')
-
-    container.querySelectorAll('[data-open-url]').forEach((btn) => {
-      btn.addEventListener('click', () => window.shipperAPI.openExternal(btn.dataset.openUrl))
-    })
-
-    container.querySelectorAll('[data-cancel-run]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true
-        btn.textContent = '...'
-        try {
-          await window.shipperAPI.cancelRun({ runId: btn.dataset.cancelRun })
-          showToast('Derleme durduruldu', 'info')
-          setTimeout(loadHistoryList, 1200)
-        } catch (e) {
-          showToast(e.message, 'error')
-          btn.disabled = false
-          btn.textContent = 'Durdur'
-        }
-      })
-    })
-
-    container.querySelectorAll('[data-watch-run]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        state.activeRunIds = [btn.dataset.watchRun]
-        state.activeRunUrl = btn.dataset.watchUrl
-        openLoadingOverlay('both')
-        if (state.pollTimer) clearInterval(state.pollTimer)
-        state.pollTimer = setInterval(async () => {
-          const runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
-          renderLiveJobs(runData)
-          if (runData.status === 'completed') {
-            state.isBuildRunning = false
-            clearInterval(state.pollTimer)
-            clearInterval(state.elapsedTimer)
-            window.shipperAPI.setProgress(-1)
-            setCancelButtonsVisible(false)
-          }
-        }, 3000)
-      })
-    })
+    state.historyList = await window.shipperAPI.getHistory()
+    populateHistoryProjectDropdown()
+    renderHistoryTable()
   } catch (e) {
     container.innerHTML = `<div class="empty-hint">${e.message}</div>`
   }
 }
+
+;['histSearch', 'histProjectFilter', 'histPlatformFilter', 'histStatusFilter', 'histDateFilter', 'histSortOrder', 'histPageSize'].forEach((id) => {
+  const el = $(id)
+  if (!el) return
+  const ev = el.tagName === 'INPUT' ? 'input' : 'change'
+  el.addEventListener(ev, () => {
+    state.historyPage = 1
+    renderHistoryTable()
+  })
+})
 
 $('btnRefreshHistory').addEventListener('click', loadHistoryList)
 

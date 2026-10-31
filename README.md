@@ -104,18 +104,63 @@ _The interface is currently in Turkish. Screenshots use demo data._
 | An **Apple Developer** account ($99/yr) for iOS | TestFlight |
 | A **Google Play Console** account ($25 once) for Android | Google Play |
 
-### Option A: Installer (recommended)
-1. Download `App Shipper Studio Setup x.y.z.exe` (installer) or `App Shipper Studio x.y.z.exe` (portable, no install) from [Releases](../../releases) or build it (see below).
-2. Windows SmartScreen may warn because the app is not code-signed: click **More info → Run anyway**.
-3. Open the app and press **Sign in with GitHub in browser**.
+### Option A: Prebuilt Desktop App (Windows & macOS)
 
-### Option B: From source
+#### 🪟 Windows (10 / 11 — x64)
+1. Download **`App Shipper Studio Setup 1.1.0.exe`** (installer) or **`App Shipper Studio 1.1.0.exe`** (portable, no install needed) from [Releases](../../releases/latest).
+2. Because the binary is not code-signed with an EV certificate, Windows SmartScreen may show a blue prompt: click **More info → Run anyway**.
+3. Open the app and click **Tarayıcıdan GitHub ile Giriş Yap** (*Sign in with GitHub in browser*).
+
+#### 🍎 macOS — Apple Silicon (`M1 / M2 / M3 / M4` — `arm64`) & Intel (`x64`)
+1. **Install prerequisites** (once in Terminal via Homebrew):
+   ```bash
+   brew install git gh
+   ```
+   *(OpenSSL comes pre-installed on macOS. Install a JDK with `brew install openjdk@17` only if you want automatic Android keystore generation.)*
+2. **Download or Build the `.dmg`:**
+   - **From Releases:** Download `App Shipper Studio-1.1.0-arm64.dmg` (for **Apple Silicon M1/M2/M3/M4**) or `App Shipper Studio-1.1.0.dmg` (for **Intel Mac**), and drag **App Shipper Studio** to `/Applications`.
+   - **Gatekeeper Note (Unsigned App):** On first launch, macOS may say *"App Shipper Studio is damaged or cannot be opened because the developer cannot be verified"*. Run this once in Terminal to clear the quarantine flag:
+     ```bash
+     xattr -cr "/Applications/App Shipper Studio.app"
+     ```
+     *(Or **Right-click → Open** in Finder, or allow it under **System Settings → Privacy & Security → Open Anyway**).*
+3. **Or run directly on any Mac (Apple Silicon or Intel) without a `.dmg`:**
+   ```bash
+   git clone https://github.com/OsmanSivrikaya/app-shipper.git
+   cd app-shipper
+   npm install
+   npm start
+   ```
+
+### Option B: Run from Source (Windows / macOS / Linux)
 ```bash
 git clone https://github.com/OsmanSivrikaya/app-shipper.git
 cd app-shipper
 npm install
 npm start
 ```
+
+### How to Use the Desktop App (Step-by-Step)
+The desktop interface is organized into **4 main tabs** on the left sidebar:
+
+1. **Projelerim (Workspace & Projects):**
+   - Click **+ Yeni** in the left sidebar to register a mobile project. Give it a name, enable **iOS** and/or **Android**, and pick your project folder (single folder for Flutter/Capacitor/React Native, or two separate folders if iOS & Android live in different repositories).
+   - **Mağaza Hesapları & Kanal:** Pick which Apple Developer profile and Google Play profile to use for this project, plus the Google Play track (`Internal`, `Alpha`, `Beta`, `Production`).
+   - **Canlı Mağaza Durumu (Live Store Status):** For iOS projects, the blue status bar automatically queries App Store Connect in real time and shows the live store version (`Yayındaki Sürüm`), the latest TestFlight build number, and the **next build number** (`Sıradaki Build`) that will be assigned automatically.
+   - **Sürüm & Build & Branch:** Override the marketing version (or click **`+0.0.1`** to bump the patch version), force a custom build number, or specify a Git branch/tag.
+   - **Gelişmiş Ayarlar (Advanced):** Expand to choose *Hemen Yayınla* (`completed`) vs *Taslak* (`draft`), toggle automatic Git commit+push before shipping, upload a project-specific `.env` file, or attach a custom `.jks` Android keystore.
+   - **Gönderim Çubuğu (Sticky Send Bar):** Click **Apple'a Gönder** (iOS only), **Android · Google'a Gönder** (Android only), or **İkisine Birden Gönder** (both in parallel).
+2. **Canlı Derleme & Arka Plan Modu (Live Build & Background Bar):**
+   - While building, a live modal shows only the selected platform(s), step-by-step progress, elapsed time, and estimated time remaining.
+   - Click **Arka Plana Al** (*Run in background*) to minimize the build into a compact floating bar at the bottom-right so you can switch projects or edit settings while it builds.
+   - Click **Derlemeyi Durdur** (*Stop Build*) at any time to cancel the running GitHub Actions job immediately.
+3. **Mağaza Hesapları (Store Accounts):**
+   - Add and manage multiple **Apple Developer (App Store Connect)** and **Google Play Console** profiles. Use the one-click browser capture buttons or select your `.p8` / `.json` files manually.
+4. **Geçmiş Gönderimler (Shipping History):**
+   - View up to 100 past builds with **Project**, **Platform (`iOS`, `Android`, `Both`)**, **Status (`Başarılı`, `Hatalı`, `Derleniyor`, `İptal Edildi`)**, and **Date Range (`Bugün`, `Son 7 Gün`, `Son 30 Gün`)** filters, **Sorting** (by newest/oldest date, project name, or build duration), keyword search, and **Pagination**.
+   - Watch or cancel currently running builds directly from the history list.
+5. **Ayarlar (Settings):**
+   - Set your central GitHub build repository (`YourUsername/app-shipper`) and optional `SOURCE_TOKEN`.
 
 ### Use your own repo (important)
 Signing keys are stored as **GitHub Secrets inside the repo that builds your apps**. To keep them yours:
@@ -239,9 +284,12 @@ gh run view <id> --repo YourName/app-shipper --log-failed
 ## Building the desktop app yourself
 ```bash
 npm install
-npm start            # run
-npm run dist:win     # dist/App Shipper Studio Setup x.y.z.exe + portable .exe
-npm run dist:mac     # .dmg + .zip (run on a Mac)
+npm start                    # run directly in Electron
+npm run dist:win             # Windows: Setup .exe + Portable .exe
+npm run dist:mac             # macOS: builds both Apple Silicon (arm64) & Intel (x64) .dmg + .zip
+npm run dist:mac:silicon     # macOS Apple Silicon (M1 / M2 / M3 / M4) only
+npm run dist:mac:intel       # macOS Intel (x64) only
+npm run dist:mac:universal   # macOS Universal binary (arm64 + x64 in a single .dmg)
 ```
 On Windows, if `electron-builder` fails extracting `winCodeSign` (symlink error), enable **Developer Mode** or run the terminal as administrator, and set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing.
 
@@ -337,18 +385,66 @@ _Arayüz şu an Türkçe. Görüntüler demo verisiyle alınmıştır._
 | iOS için **Apple Developer** hesabı (yıllık 99 USD) | TestFlight |
 | Android için **Google Play Console** hesabı (tek sefer 25 USD) | Google Play |
 
-### Seçenek A: Kurulum dosyası (önerilen)
-1. `App Shipper Studio Setup x.y.z.exe` (kurulum) ya da `App Shipper Studio x.y.z.exe` (taşınabilir, kurulumsuz) dosyasını [Releases](../../releases) sayfasından indir veya aşağıdaki gibi kendin derle.
-2. Uygulama kod imzalı olmadığı için Windows SmartScreen uyarı verebilir: **Ek bilgi → Yine de çalıştır**.
-3. Uygulamayı aç ve **Tarayıcıdan GitHub ile Giriş Yap**'a bas.
+### Seçenek A: Hazır Masaüstü Uygulaması (Windows ve macOS)
 
-### Seçenek B: Kaynaktan
+#### 🪟 Windows (10 / 11 — x64)
+1. [Releases](../../releases/latest) sayfasından **`App Shipper Studio Setup 1.1.0.exe`** (kurulum sihirbazı) ya da **`App Shipper Studio 1.1.0.exe`** (kurulumsuz taşınabilir / portable) dosyasını indir.
+2. Uygulama ticari EV sertifikasıyla imzalanmadığı için Windows SmartScreen mavi uyarı ekranı gösterebilir: **Ek bilgi (More info) → Yine de çalıştır (Run anyway)** seçeneğine tıkla.
+3. Uygulamayı aç ve **Tarayıcıdan GitHub ile Giriş Yap** butonuna bas.
+
+#### 🍎 macOS — Apple Silicon (`M1 / M2 / M3 / M4` — `arm64`) ve Intel (`x64`)
+1. **Gerekli araçları kur** (Terminal'de Homebrew ile bir kez):
+   ```bash
+   brew install git gh
+   ```
+   *(OpenSSL macOS'ta hazır gelir. Otomatik Android keystore üretimi istersen `brew install openjdk@17` kurabilirsin.)*
+2. **`.dmg` Paketiyle Kurulum (Apple Silicon & Intel):**
+   - [Releases](../../releases/latest) sayfasından işlemcine uygun olanı indir:
+     - **Apple Silicon (M1 / M2 / M3 / M4):** `App Shipper Studio-1.1.0-arm64.dmg`
+     - **Intel Mac (x64):** `App Shipper Studio-1.1.0.dmg`
+   - `.dmg` dosyasını açıp **App Shipper Studio**'yu `Applications` (Uygulamalar) klasörüne sürükle.
+   - **macOS Gatekeeper Uyarısı (İmzasız Uygulama):** İlk açılışta macOS *"App Shipper Studio hasar görmüş veya geliştirici doğrulanamıyor"* uyarısı verirse Terminal'de şu komutu bir kez çalıştırman yeterlidir:
+     ```bash
+     xattr -cr "/Applications/App Shipper Studio.app"
+     ```
+     *(Alternatif olarak Finder'da uygulamaya **Sağ Tık → Aç (Open)** diyebilir veya **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç** butonuna tıklayabilirsin.)*
+3. **Veya Mac'te (Intel / Apple Silicon fark etmeksizin) `.dmg` olmadan doğrudan çalıştır:**
+   ```bash
+   git clone https://github.com/OsmanSivrikaya/app-shipper.git
+   cd app-shipper
+   npm install
+   npm start
+   ```
+
+### Seçenek B: Kaynaktan Çalıştırma (Windows / macOS / Linux)
 ```bash
 git clone https://github.com/OsmanSivrikaya/app-shipper.git
 cd app-shipper
 npm install
 npm start
 ```
+
+### Masaüstü Uygulaması Nasıl Kullanılır? (Adım Adım Rehber)
+Masaüstü uygulaması sol menüdeki **4 ana sekmeden** oluşur:
+
+1. **Projelerim (Çalışma Alanı):**
+   - Sol menüdeki **Projelerim → + Yeni** butonuna tıklayarak mobil projeni ekle. Proje adını yaz, **iOS** ve/veya **Android** kutucuklarını işaretle ve klasörü seç (Flutter / Capacitor / React Native için tek klasör; iOS ve Android ayrı repolardaysa iki ayrı klasör seçebilirsin).
+   - **Mağaza Hesapları ve Kanal:** Bu proje için hangi Apple Developer ve Google Play hesabının kullanılacağını ve Android yayın kanalını (`Internal`, `Alpha`, `Beta`, `Production`) seç.
+   - **Canlı Mağaza Durumu (App Store Connect):** iOS etkin projelerde mavi bilgi çubuğu App Store Connect'e bağlanarak yayındaki sürümü (`Yayındaki Sürüm`), son TestFlight build numarasını ve otomatik verilecek **Sıradaki Build** numarasını canlı gösterir.
+   - **Sürüm, Build No ve Git Branch:** İstersen sürümü elle yazabilir, **`+0.0.1`** butonuyla tek tıkla bir üst sürüme geçebilir veya özel bir build numarası zorlayabilirsin.
+   - **Gelişmiş Ayarlar:** Açılır menüden *Hemen Yayınla* / *Taslak (Draft)* seçimi yapabilir, gönderim öncesi otomatik Git commit+push özelliğini açıp kapatabilir, projeye özel `.env` dosyası veya özel `.jks` keystore yükleyebilirsin.
+   - **Sabit Gönderim Çubuğu (Alt Bar):** **Apple'a Gönder** (yalnızca TestFlight), **Android · Google'a Gönder** (yalnızca Play Console) veya **İkisine Birden Gönder** butonuna tıkla.
+2. **Canlı Derleme Ekranı, Arka Plan Modu ve Durdurma:**
+   - Gönderim başladığında yalnızca seçtiğin platformun adımları, geçen süre ve tahmini kalan süre canlı gösterilir.
+   - **Arka Plana Al** butonuna basarak derlemeyi sağ altta küçük bir çubuğa küçültebilir, bu sırada başka projelere geçebilirsin.
+   - **Derlemeyi Durdur** (veya mini çubuktaki **Durdur**) butonuyla çalışan bulut derlemesini istediğin anda anında iptal edebilirsin.
+3. **Mağaza Hesapları:**
+   - Birden fazla **Apple Developer** ve **Google Play** hesabı ekleyebilir, tarayıcıdan otomatik yakalama sihirbazını kullanabilir veya `.p8` / `.json` dosyalarını bilgisayardan seçebilirsin.
+4. **Geçmiş Gönderimler (Filtreleme, Sıralama ve Sayfalama):**
+   - Son 100 gönderimi **Proje**, **Platform (`iOS`, `Android`, `Her İkisi`)**, **Durum (`Başarılı`, `Hatalı`, `Derleniyor`, `İptal Edildi`)** ve **Tarih Aralığı (`Bugün`, `Son 7 Gün`, `Son 30 Gün`)** bazında filtreleyebilir, tarihe/projeye/süreye göre sıralayabilir ve sayfalar arasında (**Pagination**) gezinebilirsin.
+   - Çalışmakta olan derlemeleri geçmiş listesinden de **Canlı İzle** veya **Durdur** butonlarıyla yönetebilirsin.
+5. **Ayarlar:**
+   - Merkezi GitHub derleme reponu (`KullanıcıAdın/app-shipper`) ve varsa özel `SOURCE_TOKEN` bilgisini buradan güncelleyebilirsin.
 
 ### Kendi reponu kullan (önemli)
 İmzalama anahtarların, uygulamalarını derleyen reponun **GitHub Secrets** alanında saklanır. Bunların sana ait kalması için:
@@ -472,9 +568,12 @@ gh run view <id> --repo KullanıcıAdın/app-shipper --log-failed
 ## Masaüstü uygulamasını kendin derle
 ```bash
 npm install
-npm start            # çalıştır
-npm run dist:win     # dist/App Shipper Studio Setup x.y.z.exe + taşınabilir .exe
-npm run dist:mac     # .dmg + .zip (Mac üzerinde çalıştır)
+npm start                    # doğrudan çalıştır
+npm run dist:win             # Windows: Setup .exe + taşınabilir (portable) .exe
+npm run dist:mac             # macOS: hem Apple Silicon (arm64) hem Intel (x64) için .dmg + .zip üretir
+npm run dist:mac:silicon     # yalnızca macOS Apple Silicon (M1 / M2 / M3 / M4) için .dmg
+npm run dist:mac:intel       # yalnızca macOS Intel (x64) için .dmg
+npm run dist:mac:universal   # macOS Universal (tek pakette hem Intel hem Silicon) .dmg
 ```
 Windows'ta `electron-builder` `winCodeSign` açarken (symlink hatası) takılırsa **Geliştirici Modu**'nu aç veya terminali yönetici olarak çalıştır, imzalamayı atlamak için `CSC_IDENTITY_AUTO_DISCOVERY=false` ayarla.
 

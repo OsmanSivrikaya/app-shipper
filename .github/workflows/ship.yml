@@ -1,5 +1,5 @@
 name: Ship
-run-name: "Ship ${{ inputs.platforms }}"
+run-name: "Ship ${{ inputs.repo }} [${{ inputs.platforms }}] ${{ inputs.version }}"
 
 # Tetikleyenler: `ship <repo>` CLI'ı, Masaüstü Uygulaması veya proje reposundaki ship-on-tag.yml (v* tag push)
 on:
