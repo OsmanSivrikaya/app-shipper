@@ -851,30 +851,43 @@ ipcMain.handle('dialog:selectFile', async (_e, { title, filters }) => {
   return res.filePaths[0]
 })
 
-function ensureShipperWorkflowSynced(shipper) {
+const SYNCED_HASHES = new Map()
+
+function gitBlobSha(buf) {
+  return crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex')
+}
+
+async function syncOneShipperFile(shipper, relPath) {
+  const buf = fs.readFileSync(path.join(SHIPPER_DIR, relPath))
+  const localSha = gitBlobSha(buf)
+  const memKey = `${shipper}:${relPath}`
+  if (SYNCED_HASHES.get(memKey) === localSha) return
+  let remoteSha = ''
   try {
-    const syncFiles = [
-      '.github/workflows/ship.yml',
-      'fastlane/Fastfile',
-      'scripts/android-signing.sh',
-      'scripts/android-build.sh',
-      'scripts/prepare.sh',
+    remoteSha = (await ghAsync(['api', `repos/${shipper}/contents/${relPath}`, '-q', '.sha'])).trim()
+  } catch { /* yeni dosya */ }
+  if (remoteSha !== localSha) {
+    const args = [
+      'api', '-X', 'PUT', `repos/${shipper}/contents/${relPath}`,
+      '-f', `message=chore: sync ${relPath} from App Shipper Desktop`,
+      '-f', `content=${buf.toString('base64')}`,
     ]
-    for (const relPath of syncFiles) {
-      const content = fs.readFileSync(path.join(SHIPPER_DIR, relPath), 'utf8')
-      let sha = ''
-      try {
-        sha = ghSync(['api', `repos/${shipper}/contents/${relPath}`, '-q', '.sha'])
-      } catch { /* yeni dosya */ }
-      const args = [
-        'api', '-X', 'PUT', `repos/${shipper}/contents/${relPath}`,
-        '-f', `message=chore: sync ${relPath} from App Shipper Desktop`,
-        '-f', `content=${Buffer.from(content).toString('base64')}`,
-      ]
-      if (sha) args.push('-f', `sha=${sha}`)
-      try { ghSync(args) } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
+    if (remoteSha) args.push('-f', `sha=${remoteSha}`)
+    try { await ghAsync(args) } catch { return }
+  }
+  SYNCED_HASHES.set(memKey, localSha)
+}
+
+// Tüm dosyalar paralel; uzakta zaten aynıysa hiç yazılmaz, aynı oturumda tekrar sorulmaz
+function ensureShipperWorkflowSynced(shipper) {
+  const syncFiles = [
+    '.github/workflows/ship.yml',
+    'fastlane/Fastfile',
+    'scripts/android-signing.sh',
+    'scripts/android-build.sh',
+    'scripts/prepare.sh',
+  ]
+  return Promise.all(syncFiles.map((f) => syncOneShipperFile(shipper, f).catch(() => {})))
 }
 
 // ─────────────────────── Canlı App Store Connect Sürüm & Build Sorgulama ───────────────────────
@@ -1194,8 +1207,8 @@ async function triggerWorkflowAndFindRun(shipper, fields) {
   ghSync(args)
 
   let run = null
-  for (let i = 0; i < 22 && !run; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
+  for (let i = 0; i < 40 && !run; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
     try {
       const list = JSON.parse(await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '10', '--json', 'databaseId,createdAt,displayTitle,url,status']))
       run = list.find((r) => r.createdAt >= before)
@@ -1213,7 +1226,7 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   const platforms = payload.platforms || 'both'
 
   sendShipEvent({ phase: 'trigger', message: 'Bulut Mac (Xcode) & Linux (Gradle) sunucuları hazırlanıyor...' })
-  ensureShipperWorkflowSynced(shipper)
+  const syncPromise = ensureShipperWorkflowSynced(shipper)
 
   const iosFolder = (payload.iosPath || '').trim()
   const androidFolder = (payload.androidPath || '').trim()
@@ -1222,6 +1235,7 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   if (platforms === 'both' && iosFolder && androidFolder && path.resolve(iosFolder) !== path.resolve(androidFolder)) {
     const iosSync = syncFolderToGitHub(iosFolder, user, payload.autoSyncGit)
     const andSync = syncFolderToGitHub(androidFolder, user, payload.autoSyncGit)
+    await syncPromise
 
     const iosRun = await triggerWorkflowAndFindRun(shipper, {
       repo: iosSync.targetRepo,
@@ -1264,6 +1278,7 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   }
 
   const synced = syncFolderToGitHub(targetFolder, user, payload.autoSyncGit)
+  await syncPromise
   const run = await triggerWorkflowAndFindRun(shipper, {
     repo: synced.targetRepo,
     platforms,

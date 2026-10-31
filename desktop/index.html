@@ -176,7 +176,7 @@
           </div>
 
           <!-- iOS ve Android Kutuları -->
-          <div class="two-col mt-20">
+          <div class="two-col mt-16">
             <!-- iOS -->
             <div class="panel-box pipe-card pipe-ios" id="cardIosPipeline">
               <div class="panel-box-header">
@@ -321,14 +321,14 @@
             </div>
           </div>
 
-          <!-- Alt Seçenekler -->
-          <div class="panel-box mt-16">
-            <div class="grid-4">
+          <!-- Yayın Ayarları (derli toplu) -->
+          <div class="panel-box compact-panel mt-12">
+            <div class="grid-3">
               <div class="field">
                 <div class="field-label-row">
                   <label>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-                    <span>Sürüm (Version)</span>
+                    <span>Sürüm</span>
                   </label>
                   <button type="button" class="btn-inline-link" id="btnBumpVersion" title="Sürümü +0.0.1 artır">+0.0.1</button>
                 </div>
@@ -337,7 +337,7 @@
               <div class="field">
                 <label>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
-                  <span>Build Numarası</span>
+                  <span>Build No</span>
                 </label>
                 <input type="text" id="inpBuildNumber" placeholder="Otomatik (#1)" />
               </div>
@@ -348,42 +348,47 @@
                 </label>
                 <input type="text" id="inpRef" placeholder="Varsayılan (main)" />
               </div>
-              <div class="field">
-                <label>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                  <span>Play Yayın Durumu</span>
-                </label>
-                <select id="selAndroidDraft">
-                  <option value="completed">Hemen Yayınla</option>
-                  <option value="draft">Taslak Bırak</option>
-                </select>
-              </div>
             </div>
 
-            <div class="bar-footer mt-14">
-              <label class="check-row">
-                <input type="checkbox" id="chkAutoSyncGit" checked />
-                <span>Göndermeden önce yerel değişiklikleri GitHub ile otomatik senkronize et</span>
-              </label>
-              <div class="bar-links">
-                <button type="button" class="btn-chip" id="btnUploadProjectEnv">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                  <span>.env Yükle</span>
-                </button>
-                <button type="button" class="btn-chip" id="btnUploadProjectKeystore">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                  <span>Özel Keystore (.jks)</span>
-                </button>
-                <button type="button" class="btn-chip" id="btnSaveWorkspaceChanges">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
-                  <span>Ayarları Kaydet</span>
-                </button>
+            <details class="adv-details mt-10">
+              <summary>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                <span>Gelişmiş ayarlar</span>
+              </summary>
+              <div class="adv-body">
+                <div class="grid-2">
+                  <div class="field">
+                    <label>Play Yayın Durumu</label>
+                    <select id="selAndroidDraft">
+                      <option value="completed">Hemen Yayınla</option>
+                      <option value="draft">Taslak Bırak</option>
+                    </select>
+                  </div>
+                  <label class="check-row adv-check">
+                    <input type="checkbox" id="chkAutoSyncGit" checked />
+                    <span>Göndermeden önce değişiklikleri GitHub ile senkronize et</span>
+                  </label>
+                </div>
+                <div class="bar-links mt-10">
+                  <button type="button" class="btn-chip" id="btnUploadProjectEnv">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span>.env Yükle</span>
+                  </button>
+                  <button type="button" class="btn-chip" id="btnUploadProjectKeystore">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                    <span>Özel Keystore</span>
+                  </button>
+                  <button type="button" class="btn-chip" id="btnSaveWorkspaceChanges">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                    <span>Kaydet</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            </details>
           </div>
 
           <!-- Gönderim Butonları -->
-          <div class="send-actions mt-20" id="shipButtonsContainer">
+          <div class="send-actions send-sticky" id="shipButtonsContainer">
             <button type="button" class="send-btn send-apple" id="btnShipApple">
               <div class="send-btn-icon icon-apple">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3z"/></svg>

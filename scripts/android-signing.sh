@@ -39,7 +39,14 @@ org.gradle.caching=true
 org.gradle.workers.max=4
 kotlin.incremental=true
 kotlin.caching.enabled=true
+kotlin.compiler.execution.strategy=in-process
 android.enableJetifier=false
+org.gradle.configuration-cache=true
+org.gradle.configuration-cache.problems=warn
+org.gradle.vfs.watch=false
+org.gradle.configureondemand=true
+android.defaults.buildfeatures.buildconfig=true
+android.nonFinalResIds=true
 EOF
 
 # versionCode her build'de artar + Lint/Test/Vital gibi yavaşlatıcı adımlar devre dışı bırakılır

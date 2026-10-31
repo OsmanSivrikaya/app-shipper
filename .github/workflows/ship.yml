@@ -84,7 +84,17 @@ jobs:
     needs: detect
     if: inputs.platforms != 'ios' && needs.detect.outputs.has_android == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+      FASTLANE_OPT_OUT_USAGE: "1"
+      FASTLANE_HIDE_CHANGELOG: "1"
+      COCOAPODS_DISABLE_STATS: "1"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      NPM_CONFIG_AUDIT: "false"
+      NPM_CONFIG_FUND: "false"
+      CI: "true"
       SHIPPER: ${{ github.workspace }}/shipper
       TYPE: ${{ needs.detect.outputs.type }}
       PM: ${{ needs.detect.outputs.pm }}
@@ -118,7 +128,6 @@ jobs:
           path: app
           fetch-depth: 1
           submodules: recursive
-          lfs: true
       - uses: actions/setup-node@v4
         if: needs.detect.outputs.node_version != ''
         with:
@@ -139,8 +148,9 @@ jobs:
             ~/.android/build-cache
             app/**/.cxx
             app/**/android/.gradle
-          key: android-turbo-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/build.gradle*', 'app/**/gradle-wrapper.properties', 'app/**/package-lock.json', 'app/**/pubspec.lock') }}
+          key: android-turbo-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/build.gradle*', 'app/**/gradle-wrapper.properties', 'app/**/package-lock.json', 'app/**/pubspec.lock') }}-${{ github.run_id }}
           restore-keys: |
+            android-turbo-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/build.gradle*', 'app/**/gradle-wrapper.properties', 'app/**/package-lock.json', 'app/**/pubspec.lock') }}-
             android-turbo-${{ runner.os }}-${{ inputs.repo }}-
 
       - uses: subosito/flutter-action@v2
@@ -193,7 +203,17 @@ jobs:
     needs: detect
     if: inputs.platforms != 'android' && needs.detect.outputs.has_ios == 'true'
     runs-on: macos-latest
+    timeout-minutes: 45
     env:
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+      FASTLANE_OPT_OUT_USAGE: "1"
+      FASTLANE_HIDE_CHANGELOG: "1"
+      COCOAPODS_DISABLE_STATS: "1"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      NPM_CONFIG_AUDIT: "false"
+      NPM_CONFIG_FUND: "false"
+      CI: "true"
       SHIPPER: ${{ github.workspace }}/shipper
       TYPE: ${{ needs.detect.outputs.type }}
       PM: ${{ needs.detect.outputs.pm }}
@@ -216,7 +236,6 @@ jobs:
           path: app
           fetch-depth: 1
           submodules: recursive
-          lfs: true
       - uses: maxim-lobanov/setup-xcode@v1
         with: { xcode-version: latest-stable }
       - uses: actions/setup-node@v4
@@ -240,8 +259,10 @@ jobs:
             ~/ship-derived
             ~/Library/Caches/CocoaPods
             app/**/Pods
-          key: ios-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved', 'app/**/Podfile.lock') }}
-          restore-keys: ios-${{ runner.os }}-${{ inputs.repo }}-
+          key: ios-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved', 'app/**/Podfile.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            ios-${{ runner.os }}-${{ inputs.repo }}-${{ hashFiles('app/**/Package.resolved', 'app/**/Podfile.lock') }}-
+            ios-${{ runner.os }}-${{ inputs.repo }}-
       - name: Önbellek klasörlerini ayarla
         run: |
           echo "IOS_SPM_DIR=$HOME/spm-cache" >> "$GITHUB_ENV"

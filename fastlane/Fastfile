@@ -135,7 +135,20 @@ platform :ios do
     final_version = ver_part.to_s.strip
     UI.success("📦 Mağaza Sürümü: #{store_version || 'Belirsiz'} | TestFlight Son Build: #{latest_build} → Yeni Gönderilen Build: ##{final_build}")
 
-    xcargs = ["CURRENT_PROJECT_VERSION=#{final_build}", 'COMPILER_INDEX_STORE_ENABLE=NO', "DEVELOPMENT_TEAM=#{team_id}"]
+    cpu = (`sysctl -n hw.ncpu`.to_i rescue 3)
+    cpu = 3 if cpu <= 0
+    xcargs = [
+      "CURRENT_PROJECT_VERSION=#{final_build}",
+      'COMPILER_INDEX_STORE_ENABLE=NO',
+      "DEVELOPMENT_TEAM=#{team_id}",
+      'DEBUG_INFORMATION_FORMAT=dwarf',
+      'ENABLE_TESTABILITY=NO',
+      'ONLY_ACTIVE_ARCH=NO',
+      'SWIFT_COMPILATION_MODE=wholemodule',
+      '-skipPackagePluginValidation',
+      '-skipMacroValidation',
+      "-jobs #{cpu}"
+    ]
     xcargs << "MARKETING_VERSION=#{final_version}" unless final_version.empty?
 
     container = ENV['IOS_WORKSPACE'].to_s.empty? ? { project: ENV['IOS_PROJECT'] } : { workspace: ENV['IOS_WORKSPACE'] }
@@ -150,13 +163,19 @@ platform :ios do
       export_options: { signingStyle: 'manual', provisioningProfiles: profiles, manageAppVersionAndBuildNumber: false },
       xcargs: xcargs.join(' '),
       output_directory: File.join(ENV.fetch('RUNNER_TEMP', '/tmp'), 'ipa'),
-      skip_profile_detection: true
+      skip_profile_detection: true,
+      include_symbols: false,
+      include_bitcode: false,
+      xcodebuild_formatter: '',
+      suppress_xcode_output: false
     )
 
     upload_to_testflight(
       api_key: api_key,
       ipa: ipa,
-      skip_waiting_for_build_processing: true
+      skip_waiting_for_build_processing: true,
+      skip_submission: true,
+      distribute_external: false
     )
   end
 end
