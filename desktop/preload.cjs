@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('shipperAPI', {
 
   selectFolder: (title) => ipcRenderer.invoke('dialog:selectFolder', title),
   inspectProject: (folderPath) => ipcRenderer.invoke('project:inspect', folderPath),
+  fetchStoreStatus: (payload) => ipcRenderer.invoke('project:fetchStoreStatus', payload),
   selectFile: (opts) => ipcRenderer.invoke('dialog:selectFile', opts),
 
   appleBrowserConnect: (payload) => ipcRenderer.invoke('accounts:appleBrowserConnect', payload),
@@ -37,6 +38,9 @@ contextBridge.exposeInMainWorld('shipperAPI', {
   getHistory: () => ipcRenderer.invoke('ship:history'),
 
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  openPath: (folderPath) => ipcRenderer.invoke('shell:openPath', folderPath),
+  setProgress: (val) => ipcRenderer.invoke('window:setProgress', val),
+  notify: (payload) => ipcRenderer.invoke('app:notify', payload),
 
   onShipEvent: (callback) => {
     const handler = (_event, data) => callback(data)

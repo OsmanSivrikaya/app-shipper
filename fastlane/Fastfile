@@ -1,4 +1,5 @@
 require 'json'
+require 'fileutils'
 
 default_platform(:ios)
 
@@ -23,7 +24,14 @@ end
 platform :ios do
   desc 'Imzala + archive + TestFlight'
   lane :ship do
-    team_id = ENV.fetch('APPLE_TEAM_ID')
+    p12_path = ENV.fetch('IOS_P12_PATH')
+    p12_pass = ENV.fetch('IOS_DIST_CERT_PASSWORD')
+
+    # Sertifikanın içinden gerçek Apple Team ID (OU) değerini otomatik çıkar (Yanlış Team ID girilmesini %100 önler)
+    cert_team_id = `openssl pkcs12 -in "#{p12_path}" -passin pass:"#{p12_pass}" -nokeys 2>/dev/null | openssl x509 -noout -subject -nameopt RFC2253 2>/dev/null`[/OU=([A-Z0-9]{10})/, 1]
+    team_id = (cert_team_id && !cert_team_id.empty?) ? cert_team_id : ENV.fetch('APPLE_TEAM_ID')
+    UI.message("🔑 Aktif Apple Team ID: #{team_id}")
+
     api_key = app_store_connect_api_key(
       key_id: ENV.fetch('ASC_KEY_ID'),
       issuer_id: ENV.fetch('ASC_ISSUER_ID'),
@@ -33,15 +41,36 @@ platform :ios do
     targets = JSON.parse(ENV.fetch('IOS_TARGETS_JSON'))
     main_bundle = ENV.fetch('IOS_BUNDLE_ID')
 
-    if Spaceship::ConnectAPI::App.find(main_bundle).nil?
+    app = Spaceship::ConnectAPI::App.find(main_bundle)
+    if app.nil?
       UI.user_error!("App Store Connect'te '#{main_bundle}' uygulama kaydı yok. appstoreconnect.apple.com → Apps → + ile bir kez oluştur.")
+    end
+
+    # App Store Connect'teki mevcut sürüm ve son TestFlight build numarasını otomatik çek
+    store_version = nil
+    begin
+      versions = app.get_app_store_versions
+      store_version = versions.first&.version_string if versions && !versions.empty?
+    rescue => e
+      UI.message("App Store sürümü okunamadı: #{e.message}")
+    end
+
+    latest_build = 0
+    begin
+      latest_build = latest_testflight_build_number(
+        api_key: api_key,
+        app_identifier: main_bundle,
+        initial_build_number: 0
+      ).to_i
+    rescue => e
+      UI.message("TestFlight son build okunamadı: #{e.message}")
     end
 
     # Geçici keychain + ortak Apple Distribution sertifikası
     setup_ci(force: true)
     import_certificate(
-      certificate_path: ENV.fetch('IOS_P12_PATH'),
-      certificate_password: ENV.fetch('IOS_DIST_CERT_PASSWORD'),
+      certificate_path: p12_path,
+      certificate_password: p12_pass,
       keychain_name: 'fastlane_tmp_keychain',
       keychain_password: ''
     )
@@ -49,12 +78,11 @@ platform :ios do
     profiles = {}
     targets.each do |t|
       bundle = t['bundle']
-      # Bundle ID Developer Portal'da yoksa oluştur (capability'ler bir kez portaldan açılmalı)
       if Spaceship::ConnectAPI::BundleId.find(bundle).nil?
         UI.important("Bundle ID oluşturuluyor: #{bundle}")
         Spaceship::ConnectAPI::BundleId.create(name: bundle.tr('.', ' '), platform: 'IOS', identifier: bundle)
       end
-      # Sertifikamıza uyan App Store profili yoksa sigh oluşturur
+
       get_provisioning_profile(
         api_key: api_key,
         app_identifier: bundle,
@@ -63,6 +91,19 @@ platform :ios do
         ignore_profiles_with_different_name: true
       )
       profiles[bundle] = lane_context[SharedValues::SIGH_NAME]
+      prof_path = lane_context[SharedValues::SIGH_PROFILE_PATH]
+      prof_uuid = lane_context[SharedValues::SIGH_UUID]
+
+      # Hem Xcode 15 hem Xcode 16/26 dizinlerine profili garanti olarak kopyala
+      if prof_path && File.exist?(prof_path) && prof_uuid
+        [
+          File.expand_path('~/Library/MobileDevice/Provisioning Profiles'),
+          File.expand_path('~/Library/Developer/Xcode/UserData/Provisioning Profiles')
+        ].each do |dir|
+          FileUtils.mkdir_p(dir)
+          FileUtils.cp(prof_path, File.join(dir, "#{prof_uuid}.mobileprovision"))
+        end
+      end
 
       update_code_signing_settings(
         path: ENV.fetch('IOS_PROJECT'),
@@ -71,12 +112,31 @@ platform :ios do
         team_id: team_id,
         code_sign_identity: 'Apple Distribution',
         profile_name: profiles[bundle],
+        profile_uuid: prof_uuid,
         bundle_identifier: bundle
       )
     end
 
-    xcargs = ["CURRENT_PROJECT_VERSION=#{ENV.fetch('BUILD_NUMBER')}", 'COMPILER_INDEX_STORE_ENABLE=NO']
-    xcargs << "MARKETING_VERSION=#{ENV['VERSION']}" unless ENV['VERSION'].to_s.empty?
+    # Build numarasını ve sürümü belirle (TestFlight'taki son build + 1 veya kullanıcı girdisi)
+    raw_version = ENV['VERSION'].to_s.strip
+    ver_part, custom_build_part = raw_version.include?('+') ? raw_version.split('+', 2) : [raw_version, '']
+    custom_build_part = ENV['CUSTOM_BUILD_NUMBER'].to_s.strip if custom_build_part.to_s.empty?
+
+    requested_build = ENV['BUILD_NUMBER'].to_s.strip
+    next_build = (latest_build + 1).to_s
+    final_build = if !custom_build_part.to_s.empty?
+                    custom_build_part.strip
+                  elsif latest_build < 100_000
+                    next_build
+                  else
+                    [requested_build.to_i, latest_build + 1].max.to_s
+                  end
+
+    final_version = ver_part.to_s.strip
+    UI.success("📦 Mağaza Sürümü: #{store_version || 'Belirsiz'} | TestFlight Son Build: #{latest_build} → Yeni Gönderilen Build: ##{final_build}")
+
+    xcargs = ["CURRENT_PROJECT_VERSION=#{final_build}", 'COMPILER_INDEX_STORE_ENABLE=NO', "DEVELOPMENT_TEAM=#{team_id}"]
+    xcargs << "MARKETING_VERSION=#{final_version}" unless final_version.empty?
 
     container = ENV['IOS_WORKSPACE'].to_s.empty? ? { project: ENV['IOS_PROJECT'] } : { workspace: ENV['IOS_WORKSPACE'] }
     container[:cloned_source_packages_path] = ENV['IOS_SPM_DIR'] unless ENV['IOS_SPM_DIR'].to_s.empty?

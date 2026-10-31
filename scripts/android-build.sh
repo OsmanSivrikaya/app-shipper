@@ -3,6 +3,12 @@
 # env: TYPE APP_DIR ANDROID_DIR GRADLE_TASK BUILD_NUMBER VERSION
 set -euo pipefail
 
+if [ -n "${VERSION:-}" ] && [[ "$VERSION" == *"+"* ]]; then
+  CUSTOM_BN="${VERSION#*+}"
+  VERSION="${VERSION%%+*}"
+  [ -n "$CUSTOM_BN" ] && BUILD_NUMBER="$CUSTOM_BN"
+fi
+
 if [ "$TYPE" = flutter ]; then
   cd "$APP_DIR"
   flutter build appbundle --release --build-number "$BUILD_NUMBER" ${VERSION:+--build-name "$VERSION"}

@@ -45,13 +45,21 @@ EOF
 # versionCode her build'de artar + Lint/Test/Vital gibi yavaşlatıcı adımlar devre dışı bırakılır
 cat > "$GH/init.d/shipper-version.gradle" <<'EOF'
 def code = System.getenv('BUILD_NUMBER')
-def name = System.getenv('VERSION')
+def rawName = System.getenv('VERSION') ?: ''
+def name = rawName
+if (rawName.contains('+')) {
+  def parts = rawName.split('\\+', 2)
+  name = parts[0]
+  if (parts.length > 1 && parts[1].trim()) {
+    code = parts[1].trim()
+  }
+}
 allprojects {
   plugins.withId('com.android.application') {
     def ac = extensions.getByName('androidComponents')
     ac.onVariants(ac.selector().all(), { variant ->
       variant.outputs.each { out ->
-        if (code) out.versionCode.set(code.toInteger())
+        if (code && code.isInteger()) out.versionCode.set(code.toInteger())
         if (name) out.versionName.set(name)
       }
     })

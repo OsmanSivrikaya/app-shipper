@@ -18,6 +18,7 @@
   "build": {
     "appId": "com.osmansivrikaya.appshipper",
     "productName": "App Shipper Studio",
+    "icon": "desktop/icon.png",
     "directories": {
       "output": "dist"
     },
@@ -31,6 +32,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "desktop/icon.ico",
       "target": [
         "nsis",
         "portable"
@@ -41,9 +43,13 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "App Shipper Studio"
+      "shortcutName": "App Shipper Studio",
+      "installerIcon": "desktop/icon.ico",
+      "uninstallerIcon": "desktop/icon.ico",
+      "installerHeaderIcon": "desktop/icon.ico"
     },
     "mac": {
+      "icon": "desktop/icon.png",
       "target": [
         "dmg",
         "zip"

@@ -9,9 +9,12 @@ const state = {
   hasDefaultGoogle: false,
   activeRunIds: [],
   activeRunUrl: '',
+  isBuildRunning: false,
+  isBuildMinimized: false,
   pollTimer: null,
   elapsedTimer: null,
   startTime: 0,
+  lastStoreStatus: null,
 }
 
 const $ = (id) => document.getElementById(id)
@@ -28,6 +31,19 @@ function showToast(msg, type = 'info') {
 function formatSec(sec) {
   const s = Math.max(0, Math.round(sec))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+function prettyStoreState(st) {
+  const map = {
+    PREPARE_FOR_SUBMISSION: 'Gönderime Hazır',
+    WAITING_FOR_REVIEW: 'İnceleme Bekliyor',
+    IN_REVIEW: 'İncelemede',
+    READY_FOR_SALE: 'Mağazada Yayında',
+    PENDING_DEVELOPER_RELEASE: 'Yayın Bekliyor',
+    REJECTED: 'Reddedildi',
+    DEVELOPER_REJECTED: 'İptal Edildi',
+  }
+  return map[st] || st || ''
 }
 
 // Pencere Kontrolleri
@@ -49,6 +65,9 @@ function switchTab(tabName) {
 document.querySelectorAll('.nav-item').forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab))
 })
+
+$('btnJumpAppleAccount')?.addEventListener('click', () => switchTab('accounts'))
+$('btnJumpGoogleAccount')?.addEventListener('click', () => switchTab('accounts'))
 
 // Başlangıç
 async function initApp() {
@@ -76,7 +95,7 @@ async function initApp() {
     renderProjectsSidebar()
 
     if (state.projects.length > 0) {
-      selectProject(state.projects[0].id)
+      await selectProject(state.projects[0].id)
     } else {
       showEmptyProjectsState()
     }
@@ -90,7 +109,7 @@ function applyUserProfile(u) {
   $('userNameText').textContent = u.name || u.login
   $('userTierText').textContent = `@${u.login}`
   if (u.avatarUrl) $('userAvatar').src = u.avatarUrl
-  $('topCloudStatus').textContent = state.shipperRepo ? `— ${state.shipperRepo}` : ''
+  $('topCloudStatus').textContent = state.shipperRepo ? `· ${state.shipperRepo}` : ''
 }
 
 // Giriş
@@ -137,7 +156,6 @@ window.shipperAPI.onWebLoginSuccess((data) => {
 $('btnWebOAuthLogin').addEventListener('click', async () => {
   const btn = $('btnWebOAuthLogin')
   btn.disabled = true
-  btn.textContent = 'Tarayıcı açılıyor...'
   try {
     const res = await window.shipperAPI.startWebLogin()
     if (res.deviceCode) {
@@ -151,7 +169,6 @@ $('btnWebOAuthLogin').addEventListener('click', async () => {
     showToast(e.message, 'error')
   } finally {
     btn.disabled = false
-    btn.textContent = 'Tarayıcıdan GitHub ile Giriş Yap'
   }
 })
 
@@ -175,11 +192,22 @@ function renderProjectsSidebar() {
 
   container.innerHTML = state.projects.map((p) => {
     const isAct = p.id === state.activeProjectId
-    const badges = [p.iosEnabled ? 'iOS' : '', p.androidEnabled ? 'And' : ''].filter(Boolean).join(' · ')
+    const ver = p.version && p.version !== '0.0.0' ? `v${p.version}` : 'v1.0'
+    const iosBadge = p.iosEnabled ? `<span class="sb-pill ios">iOS</span>` : ''
+    const andBadge = p.androidEnabled ? `<span class="sb-pill and">AND</span>` : ''
     return `
       <div class="proj-sidebar-item ${isAct ? 'active' : ''}" data-proj-id="${p.id}">
-        <span class="proj-sb-name">${p.name}</span>
-        <span class="proj-sb-badges">${badges}</span>
+        <div class="proj-sb-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        </div>
+        <div class="proj-sb-meta">
+          <div class="proj-sb-name">${p.name}</div>
+          <div class="proj-sb-sub">
+            <span>${ver}</span>
+            ${iosBadge}
+            ${andBadge}
+          </div>
+        </div>
       </div>
     `
   }).join('')
@@ -192,13 +220,28 @@ function renderProjectsSidebar() {
   })
 }
 
-function selectProject(id) {
+async function selectProject(id) {
   const proj = state.projects.find((p) => p.id === id)
   if (!proj) {
     showEmptyProjectsState()
     return
   }
   state.activeProjectId = proj.id
+
+  // Yerel klasörden güncel versiyon ve Bundle ID bilgilerini oku
+  const targetFolder = proj.iosPath || proj.androidPath
+  if (targetFolder) {
+    try {
+      const liveInfo = await window.shipperAPI.inspectProject(targetFolder)
+      if (liveInfo) {
+        if (liveInfo.version && liveInfo.version !== '0.0.0') proj.version = liveInfo.version
+        if (liveInfo.buildNumber) proj.buildNumber = liveInfo.buildNumber
+        if (liveInfo.iosBundleId) proj.iosBundleId = liveInfo.iosBundleId
+        if (liveInfo.androidPackage) proj.androidPackage = liveInfo.androidPackage
+      }
+    } catch { /* ignore */ }
+  }
+
   renderProjectsSidebar()
 
   $('emptyProjectsHero').classList.add('hidden')
@@ -206,7 +249,15 @@ function selectProject(id) {
 
   $('wsProjName').textContent = proj.name
   $('wsProjType').textContent = (proj.type || 'mobile').toUpperCase()
-  $('wsProjVersion').textContent = `v${proj.version || '1.0.0'}`
+  const displayVer = proj.version && proj.version !== '0.0.0' ? proj.version : '1.0.0'
+  $('wsProjVersion').textContent = `v${displayVer}`
+
+  const bundleParts = []
+  if (proj.iosBundleId) bundleParts.push(`iOS: ${proj.iosBundleId}`)
+  if (proj.androidPackage) bundleParts.push(`Android: ${proj.androidPackage}`)
+  $('wsProjSubPath').textContent = bundleParts.length > 0
+    ? bundleParts.join('  ·  ')
+    : (proj.iosPath || proj.androidPath || 'Yerel çalışma alanı hazır')
 
   $('wsIosEnabled').checked = proj.iosEnabled !== false
   $('wsAndroidEnabled').checked = proj.androidEnabled !== false
@@ -219,8 +270,79 @@ function selectProject(id) {
   $('selAndroidDraft').value = proj.isDraft ? 'draft' : 'completed'
   $('chkAutoSyncGit').checked = proj.autoSyncGit !== false
 
+  $('inpVersion').value = ''
+  $('inpVersion').placeholder = `Otomatik (${displayVer})`
+  $('inpBuildNumber').value = ''
+  $('inpBuildNumber').placeholder = `Otomatik (#${proj.buildNumber || '1'})`
+
   updateWorkspacePipelineUI()
+  refreshStoreStatus()
 }
+
+// Canlı App Store Connect Sürüm & Build Sorgusu
+async function refreshStoreStatus() {
+  const proj = state.projects.find((p) => p.id === state.activeProjectId)
+  if (!proj || !proj.iosEnabled) return
+
+  $('storeLiveVersion').textContent = 'Sorgulanıyor...'
+  $('storeLiveLastBuild').textContent = '...'
+  $('storeLiveNextBuild').textContent = '...'
+  $('storeLiveDot').className = 'live-dot'
+
+  try {
+    const res = await window.shipperAPI.fetchStoreStatus({
+      bundleId: proj.iosBundleId || '',
+      appleProfileSlug: $('selAppleProfile').value || proj.appleProfile || '',
+    })
+    state.lastStoreStatus = res
+
+    if (!res || !res.found) {
+      $('storeLiveAppName').textContent = proj.iosBundleId ? `App Store Connect (${proj.iosBundleId})` : 'App Store Connect'
+      $('storeLiveVersion').textContent = `Yerel: v${proj.version || '1.0.0'}`
+      $('storeLiveLastBuild').textContent = 'Kayıt / Yetki Yok'
+      $('storeLiveNextBuild').textContent = 'Build #1'
+      $('storeLiveDot').className = 'live-dot warn'
+      return
+    }
+
+    $('storeLiveDot').className = 'live-dot ok'
+    $('storeLiveAppName').textContent = `${res.appName} (${res.bundleId})`
+    const stateLabel = prettyStoreState(res.storeState)
+    $('storeLiveVersion').textContent = res.storeVersion
+      ? `v${res.storeVersion}${stateLabel ? ` · ${stateLabel}` : ''}`
+      : `Yerel: v${proj.version || '1.0'}`
+
+    $('storeLiveLastBuild').textContent = res.latestBuildNumber
+      ? `Build #${res.latestBuildNumber}${res.preReleaseVersion ? ` (v${res.preReleaseVersion})` : ''}`
+      : 'Henüz yüklenmedi'
+
+    $('storeLiveNextBuild').textContent = `Build #${res.nextBuildNumber || '1'}`
+
+    const baseVer = proj.version && proj.version !== '0.0.0' ? proj.version : (res.storeVersion || '1.0.0')
+    $('inpVersion').placeholder = `Otomatik (${baseVer})`
+    $('inpBuildNumber').placeholder = `Otomatik (#${res.nextBuildNumber || '1'})`
+  } catch {
+    $('storeLiveVersion').textContent = `Yerel: v${proj.version || '1.0.0'}`
+    $('storeLiveLastBuild').textContent = '—'
+    $('storeLiveNextBuild').textContent = 'Otomatik'
+  }
+}
+
+$('btnRefreshStoreStatus')?.addEventListener('click', refreshStoreStatus)
+$('selAppleProfile')?.addEventListener('change', refreshStoreStatus)
+
+// +0.0.1 Sürüm Artırma Butonu
+$('btnBumpVersion')?.addEventListener('click', () => {
+  const proj = state.projects.find((p) => p.id === state.activeProjectId)
+  const current = $('inpVersion').value.trim()
+    || (proj?.version && proj.version !== '0.0.0' ? proj.version : '')
+    || state.lastStoreStatus?.storeVersion
+    || '1.0.0'
+  const parts = current.split('.').map((n) => parseInt(n, 10) || 0)
+  while (parts.length < 3) parts.push(0)
+  parts[parts.length - 1] += 1
+  $('inpVersion').value = parts.join('.')
+})
 
 function updateWorkspacePipelineUI() {
   const iosOn = $('wsIosEnabled').checked
@@ -241,6 +363,16 @@ function updateWorkspacePipelineUI() {
 
 $('wsIosEnabled').addEventListener('change', updateWorkspacePipelineUI)
 $('wsAndroidEnabled').addEventListener('change', updateWorkspacePipelineUI)
+
+$('btnOpenWsIosFolder')?.addEventListener('click', () => {
+  const p = $('wsIosPath').value.trim()
+  if (p) window.shipperAPI.openPath(p)
+})
+
+$('btnOpenWsAndroidFolder')?.addEventListener('click', () => {
+  const p = $('wsAndroidPath').value.trim()
+  if (p) window.shipperAPI.openPath(p)
+})
 
 $('btnPickWsIosPath').addEventListener('click', async () => {
   const res = await window.shipperAPI.selectFolder('iOS Proje Klasörünü Seçin')
@@ -277,7 +409,7 @@ async function saveActiveWorkspaceProject() {
       autoSyncGit: $('chkAutoSyncGit').checked,
     })
     state.projects = res.projects
-    selectProject(res.project.id)
+    await selectProject(res.project.id)
   } catch (e) {
     showToast(e.message, 'error')
   }
@@ -285,7 +417,7 @@ async function saveActiveWorkspaceProject() {
 
 $('btnSaveWorkspaceChanges').addEventListener('click', async () => {
   await saveActiveWorkspaceProject()
-  showToast('Ayarlar kaydedildi', 'success')
+  showToast('Proje ayarları kaydedildi', 'success')
 })
 
 // Proje Ekle / Düzenle Modalı
@@ -387,7 +519,7 @@ $('formSaveProject').addEventListener('submit', async (e) => {
     })
     state.projects = res.projects
     $('projectModal').classList.add('hidden')
-    selectProject(res.project.id)
+    await selectProject(res.project.id)
     showToast(`"${res.project.name}" kaydedildi`, 'success')
   } catch (err) {
     showToast(err.message, 'error')
@@ -400,7 +532,7 @@ $('btnDeleteProjectInModal').addEventListener('click', async () => {
   state.projects = await window.shipperAPI.deleteProject(id)
   $('projectModal').classList.add('hidden')
   renderProjectsSidebar()
-  if (state.projects.length > 0) selectProject(state.projects[0].id)
+  if (state.projects.length > 0) await selectProject(state.projects[0].id)
   else showEmptyProjectsState()
   showToast('Proje silindi')
 })
@@ -413,7 +545,10 @@ function renderAccountSelectors() {
   appleSel.innerHTML = ''
   const defAppleOpt = document.createElement('option')
   defAppleOpt.value = ''
-  defAppleOpt.textContent = state.hasDefaultApple ? 'Varsayılan Apple Hesabı (Kayıtlı)' : 'Varsayılan Apple Hesabı'
+  const defAppleProf = state.appleProfiles.find((p) => p.isDefault)
+  defAppleOpt.textContent = defAppleProf
+    ? `${defAppleProf.label} (${defAppleProf.teamId}) — Varsayılan`
+    : (state.hasDefaultApple ? 'Varsayılan Apple Hesabı (Kayıtlı)' : 'Varsayılan Apple Hesabı')
   appleSel.appendChild(defAppleOpt)
 
   for (const p of state.appleProfiles) {
@@ -427,7 +562,10 @@ function renderAccountSelectors() {
   googleSel.innerHTML = ''
   const defGoogleOpt = document.createElement('option')
   defGoogleOpt.value = ''
-  defGoogleOpt.textContent = state.hasDefaultGoogle ? 'Varsayılan Google Hesabı (Kayıtlı)' : 'Varsayılan Google Hesabı'
+  const defGoogleProf = state.googleProfiles.find((p) => p.isDefault)
+  defGoogleOpt.textContent = defGoogleProf
+    ? `${defGoogleProf.label} — Varsayılan`
+    : (state.hasDefaultGoogle ? 'Varsayılan Google Hesabı (Kayıtlı)' : 'Varsayılan Google Hesabı')
   googleSel.appendChild(defGoogleOpt)
 
   for (const p of state.googleProfiles) {
@@ -448,7 +586,7 @@ function renderProfilesLists() {
       <div class="profile-item">
         <div>
           <div class="profile-item-title">${p.label} ${p.isDefault ? '(Varsayılan)' : ''}</div>
-          <div class="profile-item-sub">Team: ${p.teamId} · Key: ${p.keyId}</div>
+          <div class="profile-item-sub">Team ID: ${p.teamId} · Key ID: ${p.keyId}</div>
         </div>
         <button class="btn btn-xs btn-secondary" data-del-apple="${p.id}">Sil</button>
       </div>
@@ -511,6 +649,7 @@ $('btnUploadProjectKeystore').addEventListener('click', () => {
 })
 
 $('btnCloseKeystoreModal').addEventListener('click', () => $('keystoreModal').classList.add('hidden'))
+$('btnCloseKeystoreModalTop')?.addEventListener('click', () => $('keystoreModal').classList.add('hidden'))
 
 $('btnPickPkJks').addEventListener('click', async () => {
   const f = await window.shipperAPI.selectFile({
@@ -540,9 +679,7 @@ $('formProjectKeystore').addEventListener('submit', async (e) => {
 // Apple & Google Tarayıcı Asistanı ve Kayıt
 $('btnAppleBrowserWizard').addEventListener('click', async () => {
   const btn = $('btnAppleBrowserWizard')
-  const orig = btn.textContent
   btn.disabled = true
-  btn.textContent = 'Apple sayfası açık — .p8 indirin...'
   try {
     const res = await window.shipperAPI.appleBrowserConnect({
       label: $('apLabel').value,
@@ -555,8 +692,8 @@ $('btnAppleBrowserWizard').addEventListener('click', async () => {
 
     $('detailsAppleManual').open = true
 
-    if (res.p8Path && res.keyId && res.issuerId && res.teamId) {
-      showToast('Apple bilgileri yakalandı, kaydediliyor...', 'info')
+    if (res.p8Path && res.keyId && res.issuerId) {
+      showToast('Apple anahtarı yakalandı, sertifika ve Team ID doğrulanıp kaydediliyor...', 'info')
       $('formAppleAccount').requestSubmit()
     } else if (res.p8Path || res.issuerId) {
       showToast('Bilgiler yakalandı, eksik alan varsa tamamlayıp Kaydet\'e basın.', 'success')
@@ -565,7 +702,6 @@ $('btnAppleBrowserWizard').addEventListener('click', async () => {
     showToast(e.message, 'error')
   } finally {
     btn.disabled = false
-    btn.textContent = orig
   }
 })
 
@@ -599,7 +735,8 @@ $('formAppleAccount').addEventListener('submit', async (e) => {
     state.appleProfiles = res.appleProfiles
     renderProfilesLists()
     renderAccountSelectors()
-    showToast(`"${res.profile.label}" kaydedildi`, 'success')
+    refreshStoreStatus()
+    showToast(`"${res.profile.label}" (Team: ${res.profile.teamId}) kaydedildi`, 'success')
     $('formAppleAccount').reset()
   } catch (err) {
     showToast(err.message, 'error')
@@ -611,9 +748,7 @@ $('formAppleAccount').addEventListener('submit', async (e) => {
 
 $('btnGoogleBrowserWizard').addEventListener('click', async () => {
   const btn = $('btnGoogleBrowserWizard')
-  const orig = btn.textContent
   btn.disabled = true
-  btn.textContent = 'Google sayfası açık — JSON indirin...'
   try {
     const res = await window.shipperAPI.googleBrowserConnect({
       label: $('gpLabel').value,
@@ -629,7 +764,6 @@ $('btnGoogleBrowserWizard').addEventListener('click', async () => {
     showToast(e.message, 'error')
   } finally {
     btn.disabled = false
-    btn.textContent = orig
   }
 })
 
@@ -681,7 +815,6 @@ $('formGeneralSettings').addEventListener('submit', async (e) => {
   e.preventDefault()
   const btn = $('btnSaveGeneral')
   btn.disabled = true
-  btn.textContent = 'Kaydediliyor...'
   try {
     const res = await window.shipperAPI.saveGeneralSettings({
       shipperRepoName: $('setShipperRepo').value.trim(),
@@ -689,48 +822,116 @@ $('formGeneralSettings').addEventListener('submit', async (e) => {
       createRepo: $('setCreateRepo').checked,
     })
     state.shipperRepo = res.shipperRepo
-    $('topCloudStatus').textContent = `— ${state.shipperRepo}`
+    $('topCloudStatus').textContent = `· ${state.shipperRepo}`
     showToast('Ayarlar kaydedildi', 'success')
   } catch (err) {
     showToast(err.message, 'error')
   } finally {
     btn.disabled = false
-    btn.textContent = 'Kaydet'
   }
 })
 
-// Gönderim ve Yükleme Takibi
+// ─────────────────── GÖNDERİM & ARKA PLANDA DEVAM ETME (Background Continuation) ───────────────────
+
 window.shipperAPI.onShipEvent((ev) => {
   $('overallStatusLabel').textContent = ev.message
+  $('minBarStatus').textContent = ev.message
+})
+
+function minimizeBuildToBackground() {
+  $('shippingOverlay').classList.add('hidden')
+  state.isBuildMinimized = true
+  if (state.isBuildRunning || state.activeRunIds.length > 0) {
+    $('minimizedBuildBar').classList.remove('hidden')
+    $('topBuildPill').classList.remove('hidden')
+  }
+}
+
+function restoreBuildFromBackground() {
+  state.isBuildMinimized = false
+  $('shippingOverlay').classList.remove('hidden')
+  $('minimizedBuildBar').classList.add('hidden')
+}
+
+$('btnMinimizeBuildTop')?.addEventListener('click', minimizeBuildToBackground)
+$('btnHideOverlay').addEventListener('click', () => {
+  if (state.isBuildRunning) {
+    minimizeBuildToBackground()
+    showToast('Derleme arka plana alındı. Sağ alttan takip edebilirsiniz.', 'info')
+  } else {
+    $('shippingOverlay').classList.add('hidden')
+    $('minimizedBuildBar').classList.add('hidden')
+    $('topBuildPill').classList.add('hidden')
+  }
+})
+
+$('shippingOverlay').addEventListener('click', (e) => {
+  if (e.target === $('shippingOverlay')) {
+    if (state.isBuildRunning) minimizeBuildToBackground()
+    else $('shippingOverlay').classList.add('hidden')
+  }
+})
+
+$('minBarClickArea')?.addEventListener('click', restoreBuildFromBackground)
+$('btnRestoreBuildModal')?.addEventListener('click', restoreBuildFromBackground)
+$('topBuildPill')?.addEventListener('click', restoreBuildFromBackground)
+$('btnDismissMinBar')?.addEventListener('click', () => {
+  $('minimizedBuildBar').classList.add('hidden')
+  if (!state.isBuildRunning) $('topBuildPill').classList.add('hidden')
 })
 
 function openLoadingOverlay(platforms) {
+  state.isBuildRunning = true
+  state.isBuildMinimized = false
   $('shippingOverlay').classList.remove('hidden')
+  $('minimizedBuildBar').classList.add('hidden')
+  $('topBuildPill').classList.remove('hidden')
+
   const loader = $('orbitalLoader')
   loader.className = 'spinner-lg'
+  $('minBarSpinner').className = 'spinner-sm'
   $('failedLogBox').classList.add('hidden')
   $('liveJobsContainer').innerHTML = ''
+  $('btnHideOverlayText').textContent = 'Arka Planda Devam Et'
 
-  if (platforms === 'ios') {
-    $('shipModalTitle').textContent = 'App Store (TestFlight) Gönderimi'
-  } else if (platforms === 'android') {
-    $('shipModalTitle').textContent = 'Google Play Gönderimi'
-  } else {
-    $('shipModalTitle').textContent = 'App Store & Google Play Gönderimi'
-  }
+  const curProj = state.projects.find((p) => p.id === state.activeProjectId)
+  const projPrefix = curProj ? `${curProj.name} · ` : ''
+
+  let title = `${projPrefix}App Store & Google Play`
+  if (platforms === 'ios') title = `${projPrefix}iOS → TestFlight`
+  else if (platforms === 'android') title = `${projPrefix}Android → Google Play`
+
+  $('shipModalTitle').textContent = title
+  $('minBarTitle').textContent = title
 
   $('shipPhaseTag').textContent = 'BAŞLATILIYOR'
-  $('shipModalSubtitle').textContent = 'Proje senkronize ediliyor ve derleme sunucusu başlatılıyor...'
+  $('shipModalSubtitle').textContent = 'Proje senkronize ediliyor ve bulut derleme sunucusu başlatılıyor...'
   $('overallStatusLabel').textContent = 'Bağlanıyor...'
-  $('overallPctLabel').textContent = '5%'
-  $('overallProgressBar').style.width = '5%'
+  $('minBarStatus').textContent = 'Bağlanıyor...'
+  updateProgressUI(5)
 
   state.startTime = Date.now()
   if (state.elapsedTimer) clearInterval(state.elapsedTimer)
   state.elapsedTimer = setInterval(() => {
     const sec = Math.floor((Date.now() - state.startTime) / 1000)
-    $('shipElapsedTimer').textContent = formatSec(sec)
+    const formatted = formatSec(sec)
+    $('shipElapsedTimer').textContent = formatted
+    $('minBarTimer').textContent = formatted
   }, 1000)
+}
+
+function updateProgressUI(pct, statusLabel) {
+  const safePct = Math.max(5, Math.min(100, Math.round(pct)))
+  $('overallPctLabel').textContent = `${ pct }%`
+  $('overallProgressBar').style.width = `${safePct}%`
+  $('minBarPct').textContent = `${pct}%`
+  $('minBarProgressFill').style.width = `${safePct}%`
+  $('topPillText').textContent = state.isBuildRunning ? `Derleniyor · ${pct}%` : (pct === 100 ? 'Tamamlandı' : 'Durdu')
+  if (statusLabel) {
+    $('overallStatusLabel').textContent = statusLabel
+    $('minBarStatus').textContent = statusLabel
+  }
+  window.shipperAPI.setProgress(state.isBuildRunning ? safePct / 100 : -1)
 }
 
 function renderLiveJobs(runData) {
@@ -749,20 +950,19 @@ function renderLiveJobs(runData) {
 
   if (runData.status === 'completed') overallPct = 100
 
-  $('overallPctLabel').textContent = `${overallPct}%`
-  $('overallProgressBar').style.width = `${Math.max(5, overallPct)}%`
-
+  let statusText = ''
   if (runData.status !== 'completed') {
     $('shipPhaseTag').textContent = 'DERLENİYOR'
-    $('overallStatusLabel').textContent = maxRemaining > 0
+    statusText = maxRemaining > 0
       ? `Derleniyor · Tahmini kalan: ~${formatSec(maxRemaining)}`
       : 'Adımlar yürütülüyor...'
   }
+  updateProgressUI(overallPct, statusText)
 
   container.innerHTML = jobs.map((j) => {
-    let statusText = 'Sırada'
-    if (j.status === 'in_progress') statusText = `${j.pct}%`
-    else if (j.status === 'completed') statusText = j.conclusion === 'success' ? 'Tamamlandı' : 'Hata'
+    let jStatus = 'Sırada'
+    if (j.status === 'in_progress') jStatus = `${j.pct}%`
+    else if (j.status === 'completed') jStatus = j.conclusion === 'success' ? 'Tamamlandı' : 'Hata'
 
     const stepsHtml = (j.steps || []).map((st) => {
       let icon = '·'
@@ -785,7 +985,7 @@ function renderLiveJobs(runData) {
       <div class="job-card">
         <div class="job-card-header">
           <span>${j.name}</span>
-          <span class="text-muted">${statusText}</span>
+          <span class="text-muted">${jStatus}</span>
         </div>
         <div class="steps-list">${stepsHtml}</div>
       </div>
@@ -807,12 +1007,23 @@ async function startShipping(platforms) {
   await saveActiveWorkspaceProject()
   openLoadingOverlay(platforms)
 
+  const curProj = state.projects.find((p) => p.id === state.activeProjectId)
+  const rawVerInput = $('inpVersion').value.trim()
+  const rawBuildInput = $('inpBuildNumber').value.trim()
+
+  // Eğer kullanıcı özel build numarası girdiyse version+buildNumber formatında ilet
+  let versionPayload = rawVerInput
+  if (rawBuildInput) {
+    const baseVer = rawVerInput || (curProj?.version && curProj.version !== '0.0.0' ? curProj.version : '')
+    versionPayload = `${baseVer}+${rawBuildInput}`
+  }
+
   try {
     const res = await window.shipperAPI.startShip({
       iosPath,
       androidPath,
       platforms,
-      version: $('inpVersion').value.trim(),
+      version: versionPayload,
       ref: $('inpRef').value.trim(),
       androidTrack: $('selAndroidTrack').value,
       isDraft: $('selAndroidDraft').value === 'draft',
@@ -823,7 +1034,7 @@ async function startShipping(platforms) {
 
     state.activeRunIds = res.runIds || [res.runId]
     state.activeRunUrl = res.runUrl
-    $('shipModalSubtitle').textContent = `${res.repo} derlemesi takip ediliyor.`
+    $('shipModalSubtitle').textContent = `${res.repo} derlemesi canlı takip ediliyor.`
 
     if (state.pollTimer) clearInterval(state.pollTimer)
 
@@ -833,23 +1044,39 @@ async function startShipping(platforms) {
         renderLiveJobs(runData)
 
         if (runData.status === 'completed') {
+          state.isBuildRunning = false
           clearInterval(state.pollTimer)
           clearInterval(state.elapsedTimer)
+          window.shipperAPI.setProgress(-1)
+          $('btnHideOverlayText').textContent = 'Kapat'
 
           const loader = $('orbitalLoader')
+          const minSpinner = $('minBarSpinner')
+
           if (runData.conclusion === 'success') {
             loader.classList.add('completed')
+            minSpinner.classList.add('completed')
             $('shipPhaseTag').textContent = 'TAMAMLANDI'
-            $('overallStatusLabel').textContent = 'Mağaza yüklemeleri başarıyla tamamlandı.'
-            showToast('Uygulama mağazalara gönderildi', 'success')
+            updateProgressUI(100, 'Mağaza yüklemeleri başarıyla tamamlandı!')
+            showToast('Uygulama mağazalara başarıyla gönderildi!', 'success')
+            window.shipperAPI.notify({
+              title: 'App Shipper — Gönderim Tamamlandı',
+              body: `${$('minBarTitle').textContent} başarıyla mağazaya yüklendi.`,
+            })
+            refreshStoreStatus()
           } else {
             loader.classList.add('failed')
+            minSpinner.classList.add('failed')
             $('shipPhaseTag').textContent = 'HATA'
-            $('overallStatusLabel').textContent = 'Bazı adımlar tamamlanamadı.'
+            updateProgressUI(100, 'Derleme sırasında hata oluştu — detayları inceleyin.')
+            window.shipperAPI.notify({
+              title: 'App Shipper — Derleme Hatası',
+              body: `${$('minBarTitle').textContent} sırasında bir hata oluştu.`,
+            })
             const logs = await window.shipperAPI.getFailedLogs({ runId: state.activeRunIds[0] })
             if (logs) {
               $('failedLogBox').classList.remove('hidden')
-              $('failedLogPre').textContent = logs.slice(-4000)
+              $('failedLogPre').textContent = logs.slice(-4500)
             }
           }
         }
@@ -859,10 +1086,14 @@ async function startShipping(platforms) {
     await pollFn()
     state.pollTimer = setInterval(pollFn, 3000)
   } catch (e) {
+    state.isBuildRunning = false
     clearInterval(state.elapsedTimer)
+    window.shipperAPI.setProgress(-1)
+    $('btnHideOverlayText').textContent = 'Kapat'
     $('orbitalLoader').classList.add('failed')
+    $('minBarSpinner').classList.add('failed')
     $('shipPhaseTag').textContent = 'HATA'
-    $('overallStatusLabel').textContent = e.message
+    updateProgressUI(100, e.message)
     showToast(e.message, 'error')
   }
 }
@@ -871,7 +1102,6 @@ $('btnShipApple').addEventListener('click', () => startShipping('ios'))
 $('btnShipGoogle').addEventListener('click', () => startShipping('android'))
 $('btnShipBoth').addEventListener('click', () => startShipping('both'))
 
-$('btnHideOverlay').addEventListener('click', () => $('shippingOverlay').classList.add('hidden'))
 $('btnOpenRunUrl').addEventListener('click', () => {
   if (state.activeRunUrl) window.shipperAPI.openExternal(state.activeRunUrl)
 })
@@ -887,17 +1117,23 @@ async function loadHistoryList() {
       return
     }
     container.innerHTML = list.map((r) => {
-      const statusLabel = r.status !== 'completed' ? 'Çalışıyor' : r.conclusion === 'success' ? 'Başarılı' : 'Hatalı'
+      const isRunning = r.status !== 'completed'
+      const isOk = r.conclusion === 'success'
+      const dotClass = isRunning ? 'running' : (isOk ? 'success' : 'failure')
+      const statusLabel = isRunning ? 'Derleniyor' : (isOk ? 'Başarılı' : 'Hatalı')
       const dateStr = new Date(r.createdAt).toLocaleString('tr-TR')
       return `
         <div class="history-row">
           <div>
-            <div class="history-title">${r.displayTitle}</div>
+            <div class="history-title">
+              <span class="status-dot ${dotClass}"></span>
+              <span>${r.displayTitle}</span>
+            </div>
             <div class="history-sub">${dateStr} &middot; ${statusLabel}</div>
           </div>
           <div style="display:flex;gap:8px">
-            ${r.status !== 'completed' ? `<button class="btn btn-xs btn-primary" data-watch-run="${r.databaseId}" data-watch-url="${r.url}">İzle</button>` : ''}
-            <button class="btn btn-xs btn-secondary" data-open-url="${r.url}">Aç</button>
+            ${isRunning ? `<button class="btn btn-xs btn-primary" data-watch-run="${r.databaseId}" data-watch-url="${r.url}">Canlı İzle</button>` : ''}
+            <button class="btn btn-xs btn-secondary" data-open-url="${r.url}">GitHub'da Aç</button>
           </div>
         </div>
       `
@@ -916,7 +1152,12 @@ async function loadHistoryList() {
         state.pollTimer = setInterval(async () => {
           const runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
           renderLiveJobs(runData)
-          if (runData.status === 'completed') clearInterval(state.pollTimer)
+          if (runData.status === 'completed') {
+            state.isBuildRunning = false
+            clearInterval(state.pollTimer)
+            clearInterval(state.elapsedTimer)
+            window.shipperAPI.setProgress(-1)
+          }
         }, 3000)
       })
     })
