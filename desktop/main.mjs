@@ -1475,7 +1475,9 @@ async function shipLocalBundle(folder, user, payload, shipper) {
   const tag = `local-${Date.now()}`
   const archive = path.join(os.tmpdir(), `${tag}.tgz`)
   sendShipEvent({ phase: 'sync', message: 'Xcode projesi sıkıştırılıyor...' })
-  await execFileAsync('tar', ['-czf', archive, '--exclude=*BurstDebugInformation_DoNotShip', '-C', xcodeDir, '.'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
+  // Windows'ta PATH'teki Git tar'ı "C:" yolunu uzak makine sanır; sistemin bsdtar'ını kullan
+  const tarBin = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar'
+  await execFileAsync(tarBin, ['-czf', archive, '--exclude=*BurstDebugInformation_DoNotShip', '-C', xcodeDir, '.'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
   const mb = Math.round(fs.statSync(archive).size / 1048576)
   sendShipEvent({ phase: 'sync', message: `Buluta yükleniyor (${mb} MB)...` })
   try {
