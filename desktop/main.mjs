@@ -1468,6 +1468,11 @@ async function buildUnityXcode(projectDir) {
 }
 
 async function shipLocalBundle(folder, user, payload, shipper) {
+  // Önceki hatalı koşudan kalan paket (devam etmek için saklanmıştı) artık gereksiz
+  const prev = loadConfig().lastBundle
+  if (prev?.tag) {
+    try { await ghAsync(['release', 'delete', prev.tag, '-R', prev.repo, '--cleanup-tag', '-y']) } catch { /* zaten yok */ }
+  }
   let xcodeDir = folder
   if (isUnityProject(folder)) xcodeDir = await buildUnityXcode(folder)
   if (!hasXcodeProject(xcodeDir)) throw new Error('Seçilen klasörde Unity projesi veya .xcodeproj yok.')
@@ -1518,9 +1523,37 @@ async function shipLocalBundle(folder, user, payload, shipper) {
     apple_profile: payload.appleProfile || '',
   })
   if (!run) throw new Error(`Derleme başlatıldı ancak takip ID'si alınamadı: https://github.com/${shipper}/actions`)
+  const cfg = loadConfig()
+  cfg.lastBundle = { tag, repo, version: payload.version || '', appleProfile: payload.appleProfile || '', projectId: payload.projectId || '', projectName: payload.projectName || '' }
+  saveConfig(cfg)
   recordRunMeta(run.databaseId, { projectId: payload.projectId || '', projectName: payload.projectName || '', repo, platforms: 'ios', version: payload.version || '' })
   return { runIds: [run.databaseId], runId: run.databaseId, runUrl: run.url, repo, shipper }
 }
+
+// Hata sonrası: yüklenmiş paketi yeniden kullanarak yalnızca bulut kısmını (imzala → derle → TestFlight) baştan çalıştırır.
+// Unity build + sıkıştırma + yükleme tekrarlanmaz.
+ipcMain.handle('ship:resume', async () => {
+  const shipper = getShipperRepo()
+  if (!shipper) throw new Error('Merkezi app-shipper reposu bulunamadı.')
+  const last = loadConfig().lastBundle
+  if (!last?.tag) throw new Error('Devam edilecek yüklenmiş bir paket yok. Baştan gönder.')
+  try {
+    await ghAsync(['release', 'view', last.tag, '-R', last.repo])
+  } catch {
+    throw new Error('Önceki paket artık yok (silinmiş). Baştan gönder.')
+  }
+  sendShipEvent({ phase: 'trigger', message: 'Yüklenmiş paketle kaldığı yerden devam ediliyor...' })
+  const run = await triggerWorkflowAndFindRun(shipper, {
+    repo: last.repo,
+    platforms: 'ios',
+    bundle_tag: last.tag,
+    version: last.version,
+    apple_profile: last.appleProfile,
+  })
+  if (!run) throw new Error(`Derleme başlatıldı ancak takip ID'si alınamadı: https://github.com/${shipper}/actions`)
+  recordRunMeta(run.databaseId, { projectId: last.projectId, projectName: last.projectName, repo: last.repo, platforms: 'ios', version: last.version })
+  return { runIds: [run.databaseId], runId: run.databaseId, runUrl: run.url, repo: last.repo, shipper }
+})
 
 ipcMain.handle('ship:start', async (_e, payload) => {
   // payload: { projectId, projectName, iosPath, androidPath, platforms, version, ref, appSubPath, androidTrack, isDraft, appleProfile, googleProfile, autoSyncGit }

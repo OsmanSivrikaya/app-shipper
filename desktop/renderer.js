@@ -1017,6 +1017,7 @@ function openLoadingOverlay(platforms) {
   const loader = $('orbitalLoader')
   loader.className = 'spinner-lg'
   $('minBarSpinner').className = 'spinner-sm'
+  $('btnResumeShip').classList.add('hidden')
   $('failedLogBox').classList.add('hidden')
   $('liveJobsContainer').innerHTML = skeletonRows(2)
   delete $('liveJobsContainer').dataset.lastHtml
@@ -1181,7 +1182,9 @@ async function startShipping(platforms) {
   }
 
   try {
-    const res = await window.shipperAPI.startShip({
+    const resumeRun = state.resumeNext
+    state.resumeNext = false
+    const res = resumeRun ? await window.shipperAPI.resumeShip() : await window.shipperAPI.startShip({
       projectId: curProj?.id || '',
       projectName: curProj?.name || '',
       iosPath,
@@ -1239,6 +1242,7 @@ async function startShipping(platforms) {
             minSpinner.classList.add('failed')
             $('shipPhaseTag').textContent = 'HATA'
             updateProgressUI(100, 'Derleme sırasında hata oluştu — detayları inceleyin.')
+            $('btnResumeShip').classList.remove('hidden')
             window.shipperAPI.notify({
               title: 'App Shipper — Derleme Hatası',
               body: `${$('minBarTitle').textContent} sırasında bir hata oluştu.`,
@@ -1277,6 +1281,12 @@ async function startShipping(platforms) {
 $('btnShipApple').addEventListener('click', () => startShipping('ios'))
 $('btnShipGoogle').addEventListener('click', () => startShipping('android'))
 $('btnShipBoth').addEventListener('click', () => startShipping('both'))
+
+$('btnResumeShip').addEventListener('click', () => {
+  if (state.shipStarting) return
+  state.resumeNext = true
+  startShipping('ios')
+})
 
 $('btnOpenRunUrl').addEventListener('click', () => {
   if (state.activeRunUrl) window.shipperAPI.openExternal(state.activeRunUrl)

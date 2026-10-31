@@ -384,7 +384,7 @@ jobs:
           bundle exec fastlane ios ship
 
       - name: Yerel paket release'ini sil
-        if: always() && inputs.bundle_tag != ''
+        if: success() && inputs.bundle_tag != ''
         env:
           GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
         run: gh release delete "${{ inputs.bundle_tag }}" -R "${{ inputs.repo }}" --cleanup-tag -y || true
