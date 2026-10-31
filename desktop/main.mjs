@@ -1478,12 +1478,28 @@ async function shipLocalBundle(folder, user, payload, shipper) {
   // Windows'ta PATH'teki Git tar'ı "C:" yolunu uzak makine sanır; sistemin bsdtar'ını kullan
   const tarBin = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar'
   await execFileAsync(tarBin, ['-czf', archive, '--exclude=*BurstDebugInformation_DoNotShip', '-C', xcodeDir, '.'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
-  const mb = Math.round(fs.statSync(archive).size / 1048576)
+  // shipper reposu public olabilir: paket AES-256 ile şifrelenir, anahtar yalnızca repo secret'ında (BUNDLE_KEY) durur
+  sendShipEvent({ phase: 'sync', message: 'Paket şifreleniyor...' })
+  const key = crypto.randomBytes(32)
+  const iv = crypto.randomBytes(16)
+  const encrypted = `${archive}.enc`
+  await new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(encrypted)
+    out.write(iv)
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv)
+    cipher.on('error', reject)
+    out.on('error', reject)
+    out.on('finish', resolve)
+    fs.createReadStream(archive).on('error', reject).pipe(cipher).pipe(out)
+  })
+  fs.rmSync(archive)
+  setSecret(shipper, 'BUNDLE_KEY', key.toString('hex'))
+  const mb = Math.round(fs.statSync(encrypted).size / 1048576)
   sendShipEvent({ phase: 'sync', message: `Buluta yükleniyor (${mb} MB)...` })
   try {
-    await ghAsync(['release', 'create', tag, archive, '-R', shipper, '--title', tag, '--notes', 'App Shipper geçici yerel paket (iş bitince silinir)'], { timeout: 60 * 60 * 1000 })
+    await ghAsync(['release', 'create', tag, encrypted, '-R', shipper, '--title', tag, '--notes', 'App Shipper geçici yerel paket (iş bitince silinir)'], { timeout: 60 * 60 * 1000 })
   } finally {
-    try { fs.rmSync(archive) } catch { /* ignore */ }
+    try { fs.rmSync(encrypted) } catch { /* ignore */ }
   }
 
   const projectName = (payload.projectName || path.basename(isUnityProject(folder) ? path.dirname(folder) : folder)).toLowerCase().replace(/[^a-z0-9-_]/g, '-')

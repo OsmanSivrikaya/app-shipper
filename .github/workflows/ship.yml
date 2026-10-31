@@ -309,10 +309,21 @@ jobs:
         if: inputs.bundle_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          BUNDLE_KEY: ${{ secrets.BUNDLE_KEY }}
         run: |
           mkdir -p "$RUNNER_TEMP/bundle" "$IOS_DIR"
           gh release download "${{ inputs.bundle_tag }}" -R "${{ github.repository }}" -D "$RUNNER_TEMP/bundle"
-          tar -xzf "$RUNNER_TEMP/bundle/${{ inputs.bundle_tag }}.tgz" -C "$IOS_DIR"
+          cat > "$RUNNER_TEMP/dec.js" <<'JS'
+          const c=require('crypto'),fs=require('fs'),{spawn}=require('child_process');
+          const [file,dir]=process.argv.slice(2);
+          const iv=Buffer.alloc(16);const fd=fs.openSync(file,'r');fs.readSync(fd,iv,0,16,0);fs.closeSync(fd);
+          const d=c.createDecipheriv('aes-256-cbc',Buffer.from(process.env.BUNDLE_KEY,'hex'),iv);
+          const t=spawn('tar',['-xzf','-','-C',dir],{stdio:['pipe','inherit','inherit']});
+          d.on('error',e=>{console.error(e.message);process.exit(1)});
+          fs.createReadStream(file,{start:16}).pipe(d).pipe(t.stdin);
+          t.on('close',code=>process.exit(code));
+          JS
+          node "$RUNNER_TEMP/dec.js" "$RUNNER_TEMP/bundle/${{ inputs.bundle_tag }}.tgz.enc" "$IOS_DIR"
       - name: Unity Xcode projesini al
         if: inputs.bundle_tag == '' && needs.detect.outputs.type == 'unity' && needs.detect.outputs.unity_prebuilt != 'true'
         uses: actions/download-artifact@v4
