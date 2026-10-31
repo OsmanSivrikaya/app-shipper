@@ -67,6 +67,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { path: shipper, fetch-depth: 1 }
+      - name: Normalize script line endings (Desktop sync writes CRLF)
+        run: find shipper/scripts -type f \( -name '*.sh' -o -name '*.cjs' \) -exec sed -i 's/\r$//' {} +
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
@@ -120,6 +122,8 @@ jobs:
           exit $fail
       - uses: actions/checkout@v4
         with: { path: shipper, fetch-depth: 1 }
+      - name: Normalize script line endings (Desktop sync writes CRLF)
+        run: find shipper/scripts -type f \( -name '*.sh' -o -name '*.cjs' \) -exec sed -i 's/\r$//' {} +
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
@@ -228,6 +232,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { path: shipper, fetch-depth: 1 }
+      - name: Normalize script line endings (Desktop sync writes CRLF)
+        run: find shipper/scripts -type f \( -name '*.sh' -o -name '*.cjs' \) -exec sed -i 's/\r$//' {} +
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
