@@ -23,11 +23,18 @@ if [ -z "$SCHEME" ]; then
 fi
 [ -z "$SCHEME" ] && { echo "::error::Scheme bulunamadı (ship.json → ios.scheme)"; exit 1; }
 
-SETTINGS="$(xcodebuild -showBuildSettings -json "${CONTAINER[@]}" "${SPM[@]}" -scheme "$SCHEME" -configuration Release -destination 'generic/platform=iOS' 2>/dev/null)"
-# Scheme yalnız ana target'ı listeleyebilir (Expo); gömülü extension'lar (widget, share…) projenin tüm target'larından
-ALL="$(xcodebuild -showBuildSettings -json -project "$PROJ" "${SPM[@]}" -alltargets -configuration Release 2>/dev/null || echo '[]')"
-SETTINGS="$(jq -s 'add' <<<"$SETTINGS$ALL")"
-# İmzalanacak target'lar: .app + .appex (widget, notification extension…)
+# HIZ: Eskiden 2 ayrı xcodebuild -showBuildSettings (her biri SwiftPM çözümlemesi yapıp ~100 sn sürüyordu).
+# Artık TEK çağrı, paket çözümlemesi kapalı; yalnızca ana .app bulunamazsa scheme'li ikinci çağrıya düşer.
+FAST=(-skipPackageUpdates -disableAutomaticPackageResolution -skipPackagePluginValidation -skipMacroValidation)
+SETTINGS="$(xcodebuild -showBuildSettings -json -project "$PROJ" -alltargets -configuration Release "${FAST[@]}" 2>/dev/null || true)"
+echo "$SETTINGS" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || SETTINGS='[]'
+HAS_APP="$(jq -r '[.[] | .buildSettings | select(.WRAPPER_EXTENSION == "app" and .PRODUCT_BUNDLE_IDENTIFIER != null)] | length' <<<"$SETTINGS")"
+if [ "${HAS_APP:-0}" = "0" ]; then
+  echo "Hizli tarama .app bulamadi, scheme ile taraniyor..."
+  S2="$(xcodebuild -showBuildSettings -json "${CONTAINER[@]}" "${SPM[@]}" -scheme "$SCHEME" -configuration Release -destination 'generic/platform=iOS' 2>/dev/null || echo '[]')"
+  ALL="$(xcodebuild -showBuildSettings -json -project "$PROJ" "${SPM[@]}" -alltargets -configuration Release 2>/dev/null || echo '[]')"
+  SETTINGS="$(jq -s 'add' <<<"$S2$ALL")"
+fi
 TARGETS="$(jq -c '[.[] | .buildSettings | select(.WRAPPER_EXTENSION == "app" or .WRAPPER_EXTENSION == "appex")
   | select(.PRODUCT_BUNDLE_IDENTIFIER != null) | {target: .TARGET_NAME, bundle: .PRODUCT_BUNDLE_IDENTIFIER, plist: (.INFOPLIST_FILE // ""), main: (.WRAPPER_EXTENSION == "app")}]
   | unique_by(.target)' <<<"$SETTINGS")"
