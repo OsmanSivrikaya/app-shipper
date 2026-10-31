@@ -96,43 +96,31 @@ _The interface is currently in Turkish. Screenshots use demo data._
 ### Requirements
 | Need | Why |
 |---|---|
-| A **GitHub account** | Builds run on GitHub Actions |
-| **Git** and [**GitHub CLI**](https://cli.github.com) (`gh`) | Used to sync code and trigger builds |
-| **Node.js 20+** | Only for running from source / the CLI |
-| **OpenSSL** (included with Git for Windows) | Creates the iOS signing certificate |
-| **Java JDK** (only for auto-generating an Android keystore) | `keytool`; not needed if you bring your own `.jks` |
+| A **GitHub account** | Builds run automatically on your own GitHub Actions |
+| **Git** (standard on macOS / Git for Windows) | Used to sync your mobile project folder |
 | An **Apple Developer** account ($99/yr) for iOS | TestFlight |
 | A **Google Play Console** account ($25 once) for Android | Google Play |
 
-### Option A: Prebuilt Desktop App (Windows & macOS)
+*(No extra CLI tools, Node.js, Homebrew, or Java JDK installation is required — App Shipper Studio handles everything internally.)*
+
+### Option A: Install the Desktop App (Recommended — Zero Setup)
 
 #### 🪟 Windows (10 / 11 — x64)
 1. Download **`App Shipper Studio Setup 1.1.0.exe`** (installer) or **`App Shipper Studio 1.1.0.exe`** (portable, no install needed) from [Releases](../../releases/latest).
-2. Because the binary is not code-signed with an EV certificate, Windows SmartScreen may show a blue prompt: click **More info → Run anyway**.
-3. Open the app and click **Tarayıcıdan GitHub ile Giriş Yap** (*Sign in with GitHub in browser*).
+2. If Windows SmartScreen appears on first launch, click **More info → Run anyway**.
+3. Open the app and click **Tarayıcıdan GitHub ile Giriş Yap** (*Sign in with GitHub in browser*). Your own `YourUsername/app-shipper` build repo is created and configured automatically!
 
-#### 🍎 macOS — Apple Silicon (`M1 / M2 / M3 / M4` — `arm64`) & Intel (`x64`)
-1. **Install prerequisites** (once in Terminal via Homebrew):
-   ```bash
-   brew install git gh
-   ```
-   *(OpenSSL comes pre-installed on macOS. Install a JDK with `brew install openjdk@17` only if you want automatic Android keystore generation.)*
-2. **Download or Build the `.dmg`:**
-   - **From Releases:** Download `App Shipper Studio-1.1.0-arm64.dmg` (for **Apple Silicon M1/M2/M3/M4**) or `App Shipper Studio-1.1.0.dmg` (for **Intel Mac**), and drag **App Shipper Studio** to `/Applications`.
-   - **Gatekeeper Note (Unsigned App):** On first launch, macOS may say *"App Shipper Studio is damaged or cannot be opened because the developer cannot be verified"*. Run this once in Terminal to clear the quarantine flag:
-     ```bash
-     xattr -cr "/Applications/App Shipper Studio.app"
-     ```
-     *(Or **Right-click → Open** in Finder, or allow it under **System Settings → Privacy & Security → Open Anyway**).*
-3. **Or run directly on any Mac (Apple Silicon or Intel) without a `.dmg`:**
-   ```bash
-   git clone https://github.com/OsmanSivrikaya/app-shipper.git
-   cd app-shipper
-   npm install
-   npm start
-   ```
+#### 🍎 macOS — Apple Silicon (`M1 / M2 / M3 / M4`) & Intel (`x64`)
+1. Download the `.dmg` for your Mac from [Releases](../../releases/latest):
+   - **Apple Silicon (`M1 / M2 / M3 / M4`):** **`App Shipper Studio-1.1.0-arm64.dmg`**
+   - **Intel Mac (`x64`):** **`App Shipper Studio-1.1.0.dmg`**
+2. Open the `.dmg` file and drag **App Shipper Studio** into your **Applications** folder (just like any standard Mac app — no Terminal or Homebrew required).
+3. **First Launch (macOS Gatekeeper):** Because the app is ad-hoc signed without an Apple notarization certificate, the first time you open it:
+   - **Right-click (or Control-click) `App Shipper Studio` in Applications → click `Open`**, or
+   - Go to **System Settings → Privacy & Security → click `Open Anyway`**.
+4. Click **Tarayıcıdan GitHub ile Giriş Yap** (*Sign in with GitHub in browser*).
 
-### Option B: Run from Source (Windows / macOS / Linux)
+### Option B: Run from Source (For Developers)
 ```bash
 git clone https://github.com/OsmanSivrikaya/app-shipper.git
 cd app-shipper
@@ -162,11 +150,8 @@ The desktop interface is organized into **4 main tabs** on the left sidebar:
 5. **Ayarlar (Settings):**
    - Set your central GitHub build repository (`YourUsername/app-shipper`) and optional `SOURCE_TOKEN`.
 
-### Use your own repo (important)
-Signing keys are stored as **GitHub Secrets inside the repo that builds your apps**. To keep them yours:
-1. **Fork** this repository to your account (keep the name `app-shipper`).
-2. In the app: **Settings → Central build repo** → `YourName/app-shipper` → Save.
-3. Keep the fork **public** to get free, unlimited Actions minutes (secrets are never exposed; see [Security](#security--privacy)).
+### Automatic Per-User GitHub Actions Isolation
+When you sign in with GitHub, the app automatically creates a public **`YourUsername/app-shipper`** repository on **your own GitHub account** and syncs the build workflow there. All your signing secrets and GitHub Actions runs stay 100% in your own GitHub account.
 
 ## Connecting your accounts
 
@@ -377,46 +362,31 @@ _Arayüz şu an Türkçe. Görüntüler demo verisiyle alınmıştır._
 ### Gereksinimler
 | Gerekli | Neden |
 |---|---|
-| **GitHub hesabı** | Derlemeler GitHub Actions'ta çalışır |
-| **Git** ve [**GitHub CLI**](https://cli.github.com) (`gh`) | Kodu senkronlamak ve derleme tetiklemek için |
-| **Node.js 20+** | Yalnızca kaynaktan çalıştırma / CLI için |
-| **OpenSSL** (Git for Windows ile gelir) | iOS imzalama sertifikasını üretir |
-| **Java JDK** (yalnızca Android keystore'u otomatik üretmek için) | `keytool`; kendi `.jks` dosyanı kullanırsan gerekmez |
+| **GitHub hesabı** | Derlemeler otomatik olarak kendi GitHub Actions hesabında çalışır |
+| **Git** (macOS'ta hazır / Windows için Git) | Proje klasörünü senkronlamak için |
 | iOS için **Apple Developer** hesabı (yıllık 99 USD) | TestFlight |
 | Android için **Google Play Console** hesabı (tek sefer 25 USD) | Google Play |
 
-### Seçenek A: Hazır Masaüstü Uygulaması (Windows ve macOS)
+*(Terminalden `gh`, `Node.js`, `Homebrew` veya `Java JDK` gibi ekstra hiçbir şey kurmana gerek yoktur — uygulama tüm bileşenleri kendi içinde hazır yönetir.)*
+
+### Seçenek A: Hazır Masaüstü Uygulamasını Kur (Önerilen — Ekstra Kurulumsuz)
 
 #### 🪟 Windows (10 / 11 — x64)
-1. [Releases](../../releases/latest) sayfasından **`App Shipper Studio Setup 1.1.0.exe`** (kurulum sihirbazı) ya da **`App Shipper Studio 1.1.0.exe`** (kurulumsuz taşınabilir / portable) dosyasını indir.
-2. Uygulama ticari EV sertifikasıyla imzalanmadığı için Windows SmartScreen mavi uyarı ekranı gösterebilir: **Ek bilgi (More info) → Yine de çalıştır (Run anyway)** seçeneğine tıkla.
-3. Uygulamayı aç ve **Tarayıcıdan GitHub ile Giriş Yap** butonuna bas.
+1. [Releases](../../releases/latest) sayfasından **`App Shipper Studio Setup 1.1.0.exe`** (kurulum sihirbazı) ya da **`App Shipper Studio 1.1.0.exe`** (kurulumsuz taşınabilir / portable) dosyasını indir ve çalıştır.
+2. İlk açılışta Windows SmartScreen penceresi çıkarsa **Ek bilgi (More info) → Yine de çalıştır (Run anyway)** seçeneğine tıkla.
+3. Uygulamayı açıp **Tarayıcıdan GitHub ile Giriş Yap** butonuna bas. Kendi GitHub hesabında (`KullanıcıAdın/app-shipper`) derleme motoru otomatik oluşturulur!
 
-#### 🍎 macOS — Apple Silicon (`M1 / M2 / M3 / M4` — `arm64`) ve Intel (`x64`)
-1. **Gerekli araçları kur** (Terminal'de Homebrew ile bir kez):
-   ```bash
-   brew install git gh
-   ```
-   *(OpenSSL macOS'ta hazır gelir. Otomatik Android keystore üretimi istersen `brew install openjdk@17` kurabilirsin.)*
-2. **`.dmg` Paketiyle Kurulum (Apple Silicon & Intel):**
-   - [Releases](../../releases/latest) sayfasından işlemcine uygun olanı indir:
-     - **Apple Silicon (M1 / M2 / M3 / M4):** `App Shipper Studio-1.1.0-arm64.dmg`
-     - **Intel Mac (x64):** `App Shipper Studio-1.1.0.dmg`
-   - `.dmg` dosyasını açıp **App Shipper Studio**'yu `Applications` (Uygulamalar) klasörüne sürükle.
-   - **macOS Gatekeeper Uyarısı (İmzasız Uygulama):** İlk açılışta macOS *"App Shipper Studio hasar görmüş veya geliştirici doğrulanamıyor"* uyarısı verirse Terminal'de şu komutu bir kez çalıştırman yeterlidir:
-     ```bash
-     xattr -cr "/Applications/App Shipper Studio.app"
-     ```
-     *(Alternatif olarak Finder'da uygulamaya **Sağ Tık → Aç (Open)** diyebilir veya **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç** butonuna tıklayabilirsin.)*
-3. **Veya Mac'te (Intel / Apple Silicon fark etmeksizin) `.dmg` olmadan doğrudan çalıştır:**
-   ```bash
-   git clone https://github.com/OsmanSivrikaya/app-shipper.git
-   cd app-shipper
-   npm install
-   npm start
-   ```
+#### 🍎 macOS — Apple Silicon (`M1 / M2 / M3 / M4`) ve Intel (`x64`)
+1. [Releases](../../releases/latest) sayfasından Mac işlemcine uygun `.dmg` paketini indir:
+   - **Apple Silicon (`M1 / M2 / M3 / M4`):** **`App Shipper Studio-1.1.0-arm64.dmg`**
+   - **Intel Mac (`x64`):** **`App Shipper Studio-1.1.0.dmg`**
+2. İnen `.dmg` dosyasını çift tıklayarak aç ve **App Shipper Studio** ikonunu **Applications (Uygulamalar)** klasörüne sürükle (normal bir Mac uygulaması kurar gibi; Terminal veya ekstra paket kurulumu gerekmez).
+3. **İlk Açılış (macOS Gatekeeper):** Uygulama ad-hoc imzalı olduğu için ilk kez açarken:
+   - `Applications` klasöründe uygulamaya **Sağ Tık (veya Control + Tık) → Aç (Open)** deyin, ya da
+   - **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç (Open Anyway)** butonuna tıklayın.
+4. Uygulama açıldığında **Tarayıcıdan GitHub ile Giriş Yap** butonuna bas.
 
-### Seçenek B: Kaynaktan Çalıştırma (Windows / macOS / Linux)
+### Seçenek B: Kaynaktan Çalıştırma (Geliştiriciler İçin)
 ```bash
 git clone https://github.com/OsmanSivrikaya/app-shipper.git
 cd app-shipper
@@ -446,11 +416,8 @@ Masaüstü uygulaması sol menüdeki **4 ana sekmeden** oluşur:
 5. **Ayarlar:**
    - Merkezi GitHub derleme reponu (`KullanıcıAdın/app-shipper`) ve varsa özel `SOURCE_TOKEN` bilgisini buradan güncelleyebilirsin.
 
-### Kendi reponu kullan (önemli)
-İmzalama anahtarların, uygulamalarını derleyen reponun **GitHub Secrets** alanında saklanır. Bunların sana ait kalması için:
-1. Bu repoyu kendi hesabına **fork'la** (adı `app-shipper` kalsın).
-2. Uygulamada: **Ayarlar → Merkezi Derleme Reposu** → `KullanıcıAdın/app-shipper` → Kaydet.
-3. Ücretsiz ve sınırsız Actions dakikası için fork'u **public** bırak (secret'lar asla açığa çıkmaz; bkz. [Güvenlik](#güvenlik-ve-gizlilik)).
+### Her Kullanıcıya Özel Otomatik GitHub Actions Kurulumu
+Uygulamayı indirip kendi GitHub hesabınla giriş yaptığında, uygulama otomatik olarak **senin GitHub hesabında (`KullanıcıAdın/app-shipper`)** public bir derleme reposu açar ve iş akışı dosyalarını oraya senkronize eder. Eklediğin tüm mağaza anahtarları (GitHub Secrets) ve çalışan tüm GitHub Actions derlemeleri %100 **kendi GitHub hesabında** çalışır.
 
 ## Hesapları bağlama
 

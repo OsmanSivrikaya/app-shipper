@@ -120,9 +120,88 @@ function saveHistory(jobs) {
   } catch { /* ignore */ }
 }
 
+let _cachedGhPath = ''
+
+function findGh() {
+  if (_cachedGhPath && fs.existsSync(_cachedGhPath)) return _cachedGhPath
+  const isWin = process.platform === 'win32'
+  const embedded = path.join(HOME_DIR, 'bin', isWin ? 'gh.exe' : 'gh')
+  const candidates = [
+    embedded,
+    'gh',
+    '/opt/homebrew/bin/gh',
+    '/usr/local/bin/gh',
+    'C:\\Program Files\\GitHub CLI\\gh.exe',
+    'C:\\Program Files (x86)\\GitHub CLI\\gh.exe',
+  ]
+  for (const p of candidates) {
+    try {
+      execFileSync(p, ['--version'], { stdio: 'ignore' })
+      _cachedGhPath = p
+      return p
+    } catch { /* ignore */ }
+  }
+  return 'gh'
+}
+
+async function ensureEmbeddedGh() {
+  try {
+    const cur = findGh()
+    if (cur !== 'gh') return cur
+    execFileSync('gh', ['--version'], { stdio: 'ignore' })
+    return 'gh'
+  } catch {
+    // Kullanıcıda gh kurulu değilse otomatik olarak ~/.app-shipper/bin içine taşınabilir gh indir
+    const binDir = path.join(HOME_DIR, 'bin')
+    fs.mkdirSync(binDir, { recursive: true })
+    const isWin = process.platform === 'win32'
+    const isMac = process.platform === 'darwin'
+    const targetBin = path.join(binDir, isWin ? 'gh.exe' : 'gh')
+    if (fs.existsSync(targetBin)) {
+      _cachedGhPath = targetBin
+      return targetBin
+    }
+    const ver = '2.67.0'
+    let archiveName = ''
+    if (isWin) archiveName = `gh_${ver}_windows_amd64.zip`
+    else if (isMac) archiveName = process.arch === 'arm64' ? `gh_${ver}_macOS_arm64.zip` : `gh_${ver}_macOS_amd64.zip`
+    else archiveName = `gh_${ver}_linux_amd64.tar.gz`
+
+    const url = `https://github.com/cli/cli/releases/download/v${ver}/${archiveName}`
+    const archivePath = path.join(binDir, archiveName)
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`GitHub bileşeni indirilemedi (${res.status})`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    fs.writeFileSync(archivePath, buf)
+
+    execFileSync('tar', ['-xf', archivePath, '-C', binDir], { stdio: 'ignore' })
+    try { fs.unlinkSync(archivePath) } catch { /* ignore */ }
+
+    if (isWin) {
+      const extracted = path.join(binDir, 'bin', 'gh.exe')
+      if (fs.existsSync(extracted)) fs.copyFileSync(extracted, targetBin)
+    } else {
+      const subFolder = archiveName.replace(/\.(zip|tar\.gz)$/, '')
+      const extracted = path.join(binDir, subFolder, 'bin', 'gh')
+      if (fs.existsSync(extracted)) {
+        fs.copyFileSync(extracted, targetBin)
+        fs.chmodSync(targetBin, 0o755)
+      }
+    }
+    if (fs.existsSync(targetBin)) {
+      _cachedGhPath = targetBin
+      return targetBin
+    }
+  }
+  return 'gh'
+}
+
 function ghEnv() {
   const cfg = loadConfig()
   const env = { ...process.env }
+  if (process.platform === 'darwin') {
+    env.PATH = `${env.PATH || ''}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`
+  }
   if (cfg.token) {
     env.GH_TOKEN = cfg.token
   }
@@ -131,28 +210,26 @@ function ghEnv() {
 
 function ghSync(args, opts = {}) {
   try {
-    return execFileSync('gh', args, {
+    return execFileSync(findGh(), args, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: ghEnv(),
       ...opts,
     }).trim()
   } catch (e) {
-    if (e.code === 'ENOENT') throw new Error('GitHub CLI (gh) kurulu değil. Lütfen https://cli.github.com adresinden kurun.')
     throw new Error((e.stderr || e.message).toString().trim())
   }
 }
 
 async function ghAsync(args, opts = {}) {
   try {
-    const { stdout } = await execFileAsync('gh', args, {
+    const { stdout } = await execFileAsync(findGh(), args, {
       encoding: 'utf8',
       env: ghEnv(),
       ...opts,
     })
     return stdout.trim()
   } catch (e) {
-    if (e.code === 'ENOENT') throw new Error('GitHub CLI (gh) kurulu değil.')
     throw new Error((e.stderr || e.message).toString().trim())
   }
 }
@@ -341,7 +418,20 @@ function createOrLoadKeystore(profileSlug) {
         '-storepass', pass, '-keypass', pass, '-dname', 'CN=app-shipper, O=app-shipper, C=TR',
       ], { stdio: 'ignore' })
     } catch {
-      throw new Error('keytool bulunamadı. Lütfen bilgisayarınıza Java JDK kurun veya mevcut bir .jks dosyası seçin.')
+      // Bilgisayarda Java (keytool) kurulu değilse OpenSSL ile doğrudan PKCS#12 (.jks) üret — ekstra kurulum gerekmez!
+      const openssl = findOpenssl()
+      const keyTmp = path.join(dir, 'ks.key')
+      const crtTmp = path.join(dir, 'ks.crt')
+      execFileSync(openssl, [
+        'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+        '-keyout', keyTmp, '-out', crtTmp, '-days', '10000',
+        '-subj', '/CN=app-shipper/O=app-shipper/C=TR',
+      ], { stdio: 'ignore' })
+      execFileSync(openssl, [
+        'pkcs12', '-export', '-in', crtTmp, '-inkey', keyTmp,
+        '-out', jks, '-name', 'upload', '-passout', `pass:${pass}`,
+      ], { stdio: 'ignore' })
+      try { fs.unlinkSync(keyTmp); fs.unlinkSync(crtTmp) } catch { /* ignore */ }
     }
     fs.writeFileSync(passFile, pass)
   }
@@ -550,6 +640,7 @@ function inspectProjectFolder(folderPath) {
 // ─────────────────────── IPC: Başlangıç, Login & Lisans ───────────────────────
 
 ipcMain.handle('app:init', async () => {
+  await ensureEmbeddedGh().catch(() => {})
   const cfg = loadConfig()
   const userProfile = getGhUserProfile()
   const shipper = userProfile ? resolveOwnShipperRepo(userProfile.login) : (cfg.shipperRepo || '')
@@ -622,10 +713,12 @@ ipcMain.handle('auth:loginWithToken', async (_e, { licenseKey, githubToken, ship
 })
 
 ipcMain.handle('auth:startWebLogin', async () => {
+  const ghBin = await ensureEmbeddedGh()
   return new Promise((resolve, reject) => {
     try {
-      const child = spawn('gh', ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web', '-s', 'repo,workflow'], {
+      const child = spawn(ghBin, ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web', '-s', 'repo,workflow'], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: ghEnv(),
       })
       let output = ''
       let resolvedCode = false
@@ -925,6 +1018,7 @@ function ensureShipperWorkflowSynced(shipper) {
     '.github/workflows/ship.yml',
     'fastlane/Fastfile',
     'Gemfile',
+    'scripts/detect.sh',
     'scripts/ios-detect.sh',
     'scripts/android-signing.sh',
     'scripts/android-build.sh',
