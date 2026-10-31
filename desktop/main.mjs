@@ -160,17 +160,6 @@ async function ghAsync(args, opts = {}) {
 const setSecret = (repo, name, value) => ghSync(['secret', 'set', name, '-R', repo], { input: value })
 const slugOf = (str) => str.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/^_+|_+$/g, '')
 
-function getShipperRepo() {
-  const cfg = loadConfig()
-  if (cfg.shipperRepo) return cfg.shipperRepo
-  try {
-    const url = execFileSync('git', ['-C', SHIPPER_DIR, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-    const m = url.match(/github\.com[:/](.+?\/.+?)(\.git)?$/)
-    if (m) return m[1]
-  } catch { /* ignore */ }
-  return ''
-}
-
 function getGhUserProfile() {
   try {
     const raw = ghSync(['api', 'user'])
@@ -184,6 +173,63 @@ function getGhUserProfile() {
     }
   } catch {
     return null
+  }
+}
+
+function resolveOwnShipperRepo(userLogin, explicitRepo = '') {
+  const cfg = loadConfig()
+  if (explicitRepo && explicitRepo.trim()) {
+    const r = explicitRepo.trim()
+    return r.includes('/') ? r : (userLogin ? `${userLogin}/${r}` : r)
+  }
+  if (cfg.shipperRepo) {
+    const [owner] = cfg.shipperRepo.split('/')
+    // Başka bir kullanıcı uygulamayı indirip giriş yaptığında yanlışlıkla OsmanSivrikaya/app-shipper kullanmasını engelle
+    if (!userLogin || owner.toLowerCase() === userLogin.toLowerCase() || owner.toLowerCase() !== 'osmansivrikaya') {
+      return cfg.shipperRepo
+    }
+  }
+  return userLogin ? `${userLogin}/app-shipper` : ''
+}
+
+function getShipperRepo() {
+  const cfg = loadConfig()
+  if (cfg.shipperRepo) {
+    const [owner] = cfg.shipperRepo.split('/')
+    if (owner.toLowerCase() !== 'osmansivrikaya') return cfg.shipperRepo
+    const u = getGhUserProfile()
+    if (!u || u.login.toLowerCase() === 'osmansivrikaya') return cfg.shipperRepo
+    const ownRepo = `${u.login}/app-shipper`
+    cfg.shipperRepo = ownRepo
+    saveConfig(cfg)
+    return ownRepo
+  }
+  const u = getGhUserProfile()
+  if (u?.login) {
+    const ownRepo = `${u.login}/app-shipper`
+    cfg.shipperRepo = ownRepo
+    saveConfig(cfg)
+    return ownRepo
+  }
+  return ''
+}
+
+function ensureUserShipperRepoExists(shipper) {
+  if (!shipper) return
+  try {
+    ghSync(['repo', 'view', shipper])
+  } catch {
+    const repoName = shipper.split('/').pop() || 'app-shipper'
+    try {
+      // Kullanıcının kendi GitHub hesabında otomatik public derleme reposu oluştur (auto_init=true ile main dalı hazır başlar)
+      ghSync([
+        'api', '-X', 'POST', 'user/repos',
+        '-f', `name=${repoName}`,
+        '-f', 'description=App Shipper Studio — Cloud Mobile CI/CD Runner (TestFlight & Google Play)',
+        '-F', 'private=false',
+        '-F', 'auto_init=true',
+      ])
+    } catch { /* ignore */ }
   }
 }
 
@@ -505,13 +551,18 @@ function inspectProjectFolder(folderPath) {
 
 ipcMain.handle('app:init', async () => {
   const cfg = loadConfig()
-  const shipper = getShipperRepo()
-  if (shipper && !cfg.shipperRepo) {
-    cfg.shipperRepo = shipper
-    saveConfig(cfg)
+  const userProfile = getGhUserProfile()
+  const shipper = userProfile ? resolveOwnShipperRepo(userProfile.login) : (cfg.shipperRepo || '')
+
+  if (userProfile && shipper) {
+    if (cfg.shipperRepo !== shipper) {
+      cfg.shipperRepo = shipper
+      saveConfig(cfg)
+    }
+    ensureUserShipperRepoExists(shipper)
+    ensureShipperWorkflowSynced(shipper)
   }
 
-  const userProfile = getGhUserProfile()
   let remoteSecrets = []
   if (userProfile && shipper) {
     try {
@@ -553,26 +604,15 @@ ipcMain.handle('auth:loginWithToken', async (_e, { licenseKey, githubToken, ship
     throw new Error('GitHub hesabına bağlanılamadı. Lütfen geçerli bir GitHub Personal Access Token girin veya GitHub ile Giriş Yap butonunu kullanın.')
   }
 
-  const shipper = shipperRepoName ? (shipperRepoName.includes('/') ? shipperRepoName : `${userProfile.login}/${shipperRepoName}`) : (cfg.shipperRepo || `${userProfile.login}/app-shipper`)
-  try {
-    ghSync(['repo', 'view', shipper])
-  } catch {
-    try {
-      if (!fs.existsSync(path.join(SHIPPER_DIR, '.git'))) {
-        execFileSync('git', ['init', '-b', 'main'], { cwd: SHIPPER_DIR })
-      }
-      execFileSync('git', ['add', '-A'], { cwd: SHIPPER_DIR })
-      try { execFileSync('git', ['commit', '-m', 'app-shipper'], { cwd: SHIPPER_DIR, stdio: 'ignore' }) } catch { /* ignore */ }
-      ghSync(['repo', 'create', shipper, '--private', '--source', SHIPPER_DIR, '--push'])
-    } catch { /* ignore */ }
-  }
+  const shipper = resolveOwnShipperRepo(userProfile.login, shipperRepoName)
+  ensureUserShipperRepoExists(shipper)
 
   cfg.shipperRepo = shipper
   if (cfg.token) {
     try { setSecret(shipper, 'SOURCE_TOKEN', cfg.token) } catch { /* ignore */ }
   }
   saveConfig(cfg)
-  ensureShipperWorkflowSynced(shipper)
+  await ensureShipperWorkflowSynced(shipper)
 
   return {
     config: cfg,
@@ -606,15 +646,16 @@ ipcMain.handle('auth:startWebLogin', async () => {
 
       child.on('close', (code) => {
         if (code === 0) {
-          // Tarayıcıda onaylandı! Otomatik olarak oturumu ve repoyu tamamla
+          // Tarayıcıda onaylandı! Otomatik olarak kullanıcının kendi hesabında oturumu ve repoyu tamamla
           try {
             const userProfile = getGhUserProfile()
             if (userProfile) {
               const cfg = loadConfig()
               cfg.licenseKey ||= 'SHIPPER-PRO-ACTIVE'
               cfg.licenseTier ||= 'Pro Studio'
-              const shipper = cfg.shipperRepo || `${userProfile.login}/app-shipper`
+              const shipper = resolveOwnShipperRepo(userProfile.login)
               cfg.shipperRepo = shipper
+              ensureUserShipperRepoExists(shipper)
               try {
                 const tok = ghSync(['auth', 'token'])
                 if (tok) {
@@ -883,6 +924,8 @@ function ensureShipperWorkflowSynced(shipper) {
   const syncFiles = [
     '.github/workflows/ship.yml',
     'fastlane/Fastfile',
+    'Gemfile',
+    'scripts/ios-detect.sh',
     'scripts/android-signing.sh',
     'scripts/android-build.sh',
     'scripts/prepare.sh',
@@ -1092,19 +1135,10 @@ ipcMain.handle('accounts:deleteGoogle', async (_e, id) => {
 
 ipcMain.handle('settings:saveGeneral', async (_e, { shipperRepoName, sourceToken, createRepo }) => {
   const user = ghSync(['api', 'user', '-q', '.login'])
-  const shipper = shipperRepoName.includes('/') ? shipperRepoName : `${user}/${shipperRepoName || 'app-shipper'}`
+  const shipper = resolveOwnShipperRepo(user, shipperRepoName)
 
-  if (createRepo) {
-    try {
-      ghSync(['repo', 'view', shipper])
-    } catch {
-      if (!fs.existsSync(path.join(SHIPPER_DIR, '.git'))) {
-        execFileSync('git', ['init', '-b', 'main'], { cwd: SHIPPER_DIR })
-      }
-      execFileSync('git', ['add', '-A'], { cwd: SHIPPER_DIR })
-      try { execFileSync('git', ['commit', '-m', 'app-shipper'], { cwd: SHIPPER_DIR, stdio: 'ignore' }) } catch { /* ignore */ }
-      ghSync(['repo', 'create', shipper, '--private', '--source', SHIPPER_DIR, '--push'])
-    }
+  if (createRepo !== false) {
+    ensureUserShipperRepoExists(shipper)
   }
 
   const cfg = loadConfig()
@@ -1114,7 +1148,7 @@ ipcMain.handle('settings:saveGeneral', async (_e, { shipperRepoName, sourceToken
     setSecret(shipper, 'SOURCE_TOKEN', cfg.token)
   }
   saveConfig(cfg)
-  ensureShipperWorkflowSynced(shipper)
+  await ensureShipperWorkflowSynced(shipper)
   return { shipperRepo: shipper, hasToken: Boolean(cfg.token) }
 })
 

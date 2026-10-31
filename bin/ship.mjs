@@ -79,12 +79,19 @@ function resolveRepo(arg) {
 
 function shipperRepo() {
   const cfg = loadConfig()
-  if (cfg.shipperRepo) return cfg.shipperRepo
-  try {
-    const url = execFileSync('git', ['-C', SHIPPER_DIR, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-    const m = url.match(/github\.com[:/](.+?\/.+?)(\.git)?$/)
-    if (m) return m[1]
-  } catch { /* */ }
+  const me = login()
+  if (cfg.shipperRepo) {
+    const [owner] = cfg.shipperRepo.split('/')
+    if (owner.toLowerCase() === me.toLowerCase() || owner.toLowerCase() !== 'osmansivrikaya') {
+      return cfg.shipperRepo
+    }
+  }
+  if (me) {
+    const ownRepo = `${me}/app-shipper`
+    cfg.shipperRepo = ownRepo
+    saveConfig(cfg)
+    return ownRepo
+  }
   die('app-shipper reposu bulunamadı. Önce: ship setup')
 }
 
