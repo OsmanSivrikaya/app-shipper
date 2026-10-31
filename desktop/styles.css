@@ -1103,6 +1103,18 @@ select:focus {
   border-color: var(--border-hover);
 }
 
+.btn-danger {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.36);
+  color: #fca5a5;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
 .w-full { width: 100%; }
 
 /* ─────────────────── Hesap Listesi ─────────────────── */

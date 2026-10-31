@@ -1362,6 +1362,7 @@ ipcMain.handle('ship:pollRun', async (_e, { runIds, runId }) => {
   const allJobs = []
   let allCompleted = true
   let anyFailure = false
+  let anyCancelled = false
   let firstUrl = ''
 
   for (const id of ids) {
@@ -1371,10 +1372,12 @@ ipcMain.handle('ship:pollRun', async (_e, { runIds, runId }) => {
     if (data.status !== 'completed') allCompleted = false
     if (data.status === 'completed') {
       saveHistory(data.jobs || [])
-      if (data.conclusion !== 'success') anyFailure = true
+      if (data.conclusion === 'cancelled') anyCancelled = true
+      else if (data.conclusion !== 'success') anyFailure = true
     }
 
     for (const j of data.jobs || []) {
+      if (j.conclusion === 'skipped') continue
       const e = estimateJob(j, hist, now)
       const steps = (j.steps || [])
         .filter((st) => st.conclusion !== 'skipped' && !HIDDEN_STEP.test(st.name))
@@ -1407,10 +1410,21 @@ ipcMain.handle('ship:pollRun', async (_e, { runIds, runId }) => {
 
   return {
     status: allCompleted ? 'completed' : 'in_progress',
-    conclusion: allCompleted ? (anyFailure ? 'failure' : 'success') : null,
+    conclusion: allCompleted ? (anyCancelled ? 'cancelled' : anyFailure ? 'failure' : 'success') : null,
     url: firstUrl,
     jobs: allJobs,
   }
+})
+
+ipcMain.handle('ship:cancelRun', async (_e, { runIds, runId }) => {
+  const shipper = getShipperRepo()
+  const ids = Array.isArray(runIds) && runIds.length ? runIds : [runId].filter(Boolean)
+  for (const id of ids) {
+    try {
+      await ghAsync(['run', 'cancel', String(id), '-R', shipper])
+    } catch { /* ignore */ }
+  }
+  return true
 })
 
 ipcMain.handle('ship:getFailedLogs', async (_e, { runId }) => {

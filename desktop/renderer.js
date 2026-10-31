@@ -880,12 +880,65 @@ $('btnDismissMinBar')?.addEventListener('click', () => {
   if (!state.isBuildRunning) $('topBuildPill').classList.add('hidden')
 })
 
+function setCancelButtonsVisible(visible) {
+  $('btnCancelBuild')?.classList.toggle('hidden', !visible)
+  $('btnCancelMinBar')?.classList.toggle('hidden', !visible)
+  if ($('btnCancelBuild')) {
+    $('btnCancelBuild').disabled = false
+    $('btnCancelBuild').innerHTML = `
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+      <span>Derlemeyi Durdur</span>
+    `
+  }
+  if ($('btnCancelMinBar')) {
+    $('btnCancelMinBar').disabled = false
+    $('btnCancelMinBar').textContent = 'Durdur'
+  }
+}
+
+async function cancelActiveBuild() {
+  if (!state.activeRunIds || !state.activeRunIds.length) return
+  if ($('btnCancelBuild')) {
+    $('btnCancelBuild').disabled = true
+    $('btnCancelBuild').textContent = 'Durduruluyor...'
+  }
+  if ($('btnCancelMinBar')) {
+    $('btnCancelMinBar').disabled = true
+    $('btnCancelMinBar').textContent = '...'
+  }
+  try {
+    await window.shipperAPI.cancelRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
+    state.isBuildRunning = false
+    if (state.pollTimer) clearInterval(state.pollTimer)
+    if (state.elapsedTimer) clearInterval(state.elapsedTimer)
+    window.shipperAPI.setProgress(-1)
+    setCancelButtonsVisible(false)
+    $('btnHideOverlayText').textContent = 'Kapat'
+    $('orbitalLoader').classList.add('failed')
+    $('minBarSpinner').classList.add('failed')
+    $('shipPhaseTag').textContent = 'İPTAL EDİLDİ'
+    updateProgressUI(100, 'Derleme kullanıcı tarafından durduruldu.')
+    showToast('Derleme durduruldu', 'info')
+  } catch (e) {
+    showToast(`Durdurulamadı: ${e.message}`, 'error')
+    setCancelButtonsVisible(true)
+  }
+}
+
+$('btnCancelBuild')?.addEventListener('click', cancelActiveBuild)
+$('btnCancelMinBar')?.addEventListener('click', (e) => {
+  e.stopPropagation()
+  cancelActiveBuild()
+})
+
 function openLoadingOverlay(platforms) {
   state.isBuildRunning = true
   state.isBuildMinimized = false
+  state.activePlatforms = platforms
   $('shippingOverlay').classList.remove('hidden')
   $('minimizedBuildBar').classList.add('hidden')
   $('topBuildPill').classList.remove('hidden')
+  setCancelButtonsVisible(true)
 
   const loader = $('orbitalLoader')
   loader.className = 'spinner-lg'
@@ -922,7 +975,7 @@ function openLoadingOverlay(platforms) {
 
 function updateProgressUI(pct, statusLabel) {
   const safePct = Math.max(5, Math.min(100, Math.round(pct)))
-  $('overallPctLabel').textContent = `${ pct }%`
+  $('overallPctLabel').textContent = `${pct}%`
   $('overallProgressBar').style.width = `${safePct}%`
   $('minBarPct').textContent = `${pct}%`
   $('minBarProgressFill').style.width = `${safePct}%`
@@ -935,16 +988,20 @@ function updateProgressUI(pct, statusLabel) {
 }
 
 function renderLiveJobs(runData) {
-  const jobs = runData.jobs || []
+  // Atlanan (skipped) platform işlerini kesinlikle gizle (örn: sadece iOS seçildiğinde Android -> Google Play)
+  const rawJobs = (runData.jobs || []).filter((j) => j.conclusion !== 'skipped')
   const container = $('liveJobsContainer')
 
-  const mainJobs = jobs.filter((j) => j.name !== 'detect')
+  const mainJobs = rawJobs.filter((j) => j.name !== 'detect')
+  // Ana platform işleri başladıysa "detect" ön kontrol kartını gizle ki ekran sade kalsın
+  const jobs = mainJobs.length > 0 ? mainJobs : rawJobs
+
   let overallPct = 10
   let maxRemaining = 0
   if (mainJobs.length > 0) {
     overallPct = Math.round(mainJobs.reduce((acc, j) => acc + (j.pct || 0), 0) / mainJobs.length)
     maxRemaining = Math.max(0, ...mainJobs.filter((j) => j.status !== 'completed').map((j) => j.remaining || 0))
-  } else if (jobs.some((j) => j.name === 'detect' && j.status === 'completed')) {
+  } else if (rawJobs.some((j) => j.name === 'detect' && j.status === 'completed')) {
     overallPct = 15
   }
 
@@ -962,12 +1019,22 @@ function renderLiveJobs(runData) {
   container.innerHTML = jobs.map((j) => {
     let jStatus = 'Sırada'
     if (j.status === 'in_progress') jStatus = `${j.pct}%`
-    else if (j.status === 'completed') jStatus = j.conclusion === 'success' ? 'Tamamlandı' : 'Hata'
+    else if (j.status === 'completed') {
+      if (j.conclusion === 'success') jStatus = 'Tamamlandı'
+      else if (j.conclusion === 'cancelled') jStatus = 'İptal Edildi'
+      else jStatus = 'Hata'
+    }
 
-    const stepsHtml = (j.steps || []).map((st) => {
+    const visibleSteps = (j.steps || []).filter((st) => st.conclusion !== 'skipped')
+    const stepsHtml = visibleSteps.map((st) => {
       let icon = '·'
-      if (st.status === 'completed') icon = st.conclusion === 'failure' ? '✕' : '✓'
-      else if (st.status === 'in_progress') icon = `<span class="step-spinner"></span>`
+      if (st.status === 'completed') {
+        if (st.conclusion === 'failure') icon = '✕'
+        else if (st.conclusion === 'cancelled') icon = '⊘'
+        else icon = '✓'
+      } else if (st.status === 'in_progress') {
+        icon = `<span class="step-spinner"></span>`
+      }
 
       const timeText = st.duration > 0 ? formatSec(st.duration) : ''
       return `
@@ -984,7 +1051,7 @@ function renderLiveJobs(runData) {
     return `
       <div class="job-card">
         <div class="job-card-header">
-          <span>${j.name}</span>
+          <span>${j.name === 'detect' ? 'Platform Hazırlığı' : j.name}</span>
           <span class="text-muted">${jStatus}</span>
         </div>
         <div class="steps-list">${stepsHtml}</div>
@@ -1048,6 +1115,7 @@ async function startShipping(platforms) {
           clearInterval(state.pollTimer)
           clearInterval(state.elapsedTimer)
           window.shipperAPI.setProgress(-1)
+          setCancelButtonsVisible(false)
           $('btnHideOverlayText').textContent = 'Kapat'
 
           const loader = $('orbitalLoader')
@@ -1064,6 +1132,11 @@ async function startShipping(platforms) {
               body: `${$('minBarTitle').textContent} başarıyla mağazaya yüklendi.`,
             })
             refreshStoreStatus()
+          } else if (runData.conclusion === 'cancelled') {
+            loader.classList.add('failed')
+            minSpinner.classList.add('failed')
+            $('shipPhaseTag').textContent = 'İPTAL EDİLDİ'
+            updateProgressUI(100, 'Derleme kullanıcı tarafından durduruldu.')
           } else {
             loader.classList.add('failed')
             minSpinner.classList.add('failed')
@@ -1089,6 +1162,7 @@ async function startShipping(platforms) {
     state.isBuildRunning = false
     clearInterval(state.elapsedTimer)
     window.shipperAPI.setProgress(-1)
+    setCancelButtonsVisible(false)
     $('btnHideOverlayText').textContent = 'Kapat'
     $('orbitalLoader').classList.add('failed')
     $('minBarSpinner').classList.add('failed')
@@ -1119,8 +1193,9 @@ async function loadHistoryList() {
     container.innerHTML = list.map((r) => {
       const isRunning = r.status !== 'completed'
       const isOk = r.conclusion === 'success'
+      const isCancelled = r.conclusion === 'cancelled'
       const dotClass = isRunning ? 'running' : (isOk ? 'success' : 'failure')
-      const statusLabel = isRunning ? 'Derleniyor' : (isOk ? 'Başarılı' : 'Hatalı')
+      const statusLabel = isRunning ? 'Derleniyor' : (isOk ? 'Başarılı' : (isCancelled ? 'İptal Edildi' : 'Hatalı'))
       const dateStr = new Date(r.createdAt).toLocaleString('tr-TR')
       return `
         <div class="history-row">
@@ -1132,6 +1207,7 @@ async function loadHistoryList() {
             <div class="history-sub">${dateStr} &middot; ${statusLabel}</div>
           </div>
           <div style="display:flex;gap:8px">
+            ${isRunning ? `<button class="btn btn-xs btn-danger" data-cancel-run="${r.databaseId}">Durdur</button>` : ''}
             ${isRunning ? `<button class="btn btn-xs btn-primary" data-watch-run="${r.databaseId}" data-watch-url="${r.url}">Canlı İzle</button>` : ''}
             <button class="btn btn-xs btn-secondary" data-open-url="${r.url}">GitHub'da Aç</button>
           </div>
@@ -1141,6 +1217,22 @@ async function loadHistoryList() {
 
     container.querySelectorAll('[data-open-url]').forEach((btn) => {
       btn.addEventListener('click', () => window.shipperAPI.openExternal(btn.dataset.openUrl))
+    })
+
+    container.querySelectorAll('[data-cancel-run]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true
+        btn.textContent = '...'
+        try {
+          await window.shipperAPI.cancelRun({ runId: btn.dataset.cancelRun })
+          showToast('Derleme durduruldu', 'info')
+          setTimeout(loadHistoryList, 1200)
+        } catch (e) {
+          showToast(e.message, 'error')
+          btn.disabled = false
+          btn.textContent = 'Durdur'
+        }
+      })
     })
 
     container.querySelectorAll('[data-watch-run]').forEach((btn) => {
@@ -1157,6 +1249,7 @@ async function loadHistoryList() {
             clearInterval(state.pollTimer)
             clearInterval(state.elapsedTimer)
             window.shipperAPI.setProgress(-1)
+            setCancelButtonsVisible(false)
           }
         }, 3000)
       })

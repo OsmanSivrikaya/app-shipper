@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('shipperAPI', {
 
   startShip: (payload) => ipcRenderer.invoke('ship:start', payload),
   pollRun: (payload) => ipcRenderer.invoke('ship:pollRun', payload),
+  cancelRun: (payload) => ipcRenderer.invoke('ship:cancelRun', payload),
   getFailedLogs: (payload) => ipcRenderer.invoke('ship:getFailedLogs', payload),
   getHistory: () => ipcRenderer.invoke('ship:history'),
 
