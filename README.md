@@ -18,6 +18,7 @@
 ## Contents
 - [What is it?](#what-is-it)
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [How it works](#how-it-works)
 - [Quick start (Desktop app)](#quick-start-desktop-app)
 - [Connecting your accounts](#connecting-your-accounts)
@@ -52,6 +53,29 @@ You ──► App Shipper Studio ──► GitHub Actions (your own copy of this
 - **Automatic signing**: Apple Distribution certificate, provisioning profile and Android upload keystore are created and managed for you.
 - **Per-project `.env` and custom keystore** support.
 - **Git auto-sync**: uncommitted changes are committed and pushed before shipping (can be turned off).
+
+## Screenshots
+_The interface is currently in Turkish. Screenshots use demo data._
+
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="Project workspace: accounts, live App Store status, version/build and the sticky send bar" width="880" />
+</p>
+<p align="center"><em>Project workspace: accounts, live App Store status, version/build and the sticky send bar</em></p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/build-progress.png" alt="Live build progress with per-step status and time left" /><br /><sub>Live build progress with per-step status and time left</sub></td>
+    <td width="50%"><img src="docs/screenshots/build-background.png" alt="Background mode: a small progress bar plus a pill in the title bar" /><br /><sub>Background mode: a small progress bar plus a pill in the title bar</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/accounts.png" alt="Multiple Apple Developer and Google Play accounts" /><br /><sub>Multiple Apple Developer and Google Play accounts</sub></td>
+    <td width="50%"><img src="docs/screenshots/history.png" alt="Shipping history with live status" /><br /><sub>Shipping history with live status</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/workspace-advanced.png" alt="Advanced settings: publish mode, git sync, .env, custom keystore" /><br /><sub>Advanced settings: publish mode, git sync, .env, custom keystore</sub></td>
+    <td width="50%"><img src="docs/screenshots/login.png" alt="One-click GitHub sign-in from the browser" /><br /><sub>One-click GitHub sign-in from the browser</sub></td>
+  </tr>
+</table>
 
 ## How it works
 1. The desktop app pushes your project to GitHub (or uses the repo it already has).
@@ -227,6 +251,7 @@ On Windows, if `electron-builder` fails extracting `winCodeSign` (symlink error)
 ## İçindekiler
 - [Nedir?](#nedir)
 - [Özellikler](#özellikler)
+- [Ekran görüntüleri](#ekran-görüntüleri)
 - [Nasıl çalışır?](#nasıl-çalışır)
 - [Hızlı başlangıç (Masaüstü uygulaması)](#hızlı-başlangıç-masaüstü-uygulaması)
 - [Hesapları bağlama](#hesapları-bağlama)
@@ -261,6 +286,29 @@ Sen ──► App Shipper Studio ──► GitHub Actions (bu reponun kendi kopy
 - **Otomatik imzalama**: Apple Distribution sertifikası, provisioning profile ve Android upload keystore senin yerine oluşturulur.
 - Projeye özel **`.env`** ve özel **keystore** desteği.
 - **Git otomatik senkron**: göndermeden önce değişiklikler commitlenip pushlanır (kapatılabilir).
+
+## Ekran görüntüleri
+_Arayüz şu an Türkçe. Görüntüler demo verisiyle alınmıştır._
+
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="Proje çalışma alanı: hesaplar, canlı App Store durumu, sürüm/build ve sabit gönder çubuğu" width="880" />
+</p>
+<p align="center"><em>Proje çalışma alanı: hesaplar, canlı App Store durumu, sürüm/build ve sabit gönder çubuğu</em></p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/build-progress.png" alt="Adım adım durum ve kalan süreyle canlı derleme ilerlemesi" /><br /><sub>Adım adım durum ve kalan süreyle canlı derleme ilerlemesi</sub></td>
+    <td width="50%"><img src="docs/screenshots/build-background.png" alt="Arka plan modu: küçük ilerleme çubuğu ve başlıkta bir hap" /><br /><sub>Arka plan modu: küçük ilerleme çubuğu ve başlıkta bir hap</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/accounts.png" alt="Birden fazla Apple Developer ve Google Play hesabı" /><br /><sub>Birden fazla Apple Developer ve Google Play hesabı</sub></td>
+    <td width="50%"><img src="docs/screenshots/history.png" alt="Canlı durumlu gönderim geçmişi" /><br /><sub>Canlı durumlu gönderim geçmişi</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/workspace-advanced.png" alt="Gelişmiş ayarlar: yayın modu, git senkron, .env, özel keystore" /><br /><sub>Gelişmiş ayarlar: yayın modu, git senkron, .env, özel keystore</sub></td>
+    <td width="50%"><img src="docs/screenshots/login.png" alt="Tarayıcıdan tek tıkla GitHub girişi" /><br /><sub>Tarayıcıdan tek tıkla GitHub girişi</sub></td>
+  </tr>
+</table>
 
 ## Nasıl çalışır?
 1. Masaüstü uygulaması projeni GitHub'a gönderir (zaten repon varsa onu kullanır).
