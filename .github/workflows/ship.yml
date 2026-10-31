@@ -268,8 +268,6 @@ jobs:
     if: ${{ !cancelled() && needs.detect.result == 'success' && inputs.platforms != 'android' && needs.detect.outputs.has_ios == 'true' && (needs.unity.result == 'success' || needs.unity.result == 'skipped') }}
     runs-on: macos-latest
     timeout-minutes: 60
-    permissions:
-      contents: write   # yerel paket release'ini işin sonunda silmek için
     env:
       FASTLANE_SKIP_UPDATE_CHECK: "1"
       FASTLANE_OPT_OUT_USAGE: "1"
@@ -308,11 +306,11 @@ jobs:
       - name: Yerel Xcode paketini indir
         if: inputs.bundle_tag != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
           BUNDLE_KEY: ${{ secrets.BUNDLE_KEY }}
         run: |
           mkdir -p "$RUNNER_TEMP/bundle" "$IOS_DIR"
-          gh release download "${{ inputs.bundle_tag }}" -R "${{ github.repository }}" -D "$RUNNER_TEMP/bundle"
+          gh release download "${{ inputs.bundle_tag }}" -R "${{ inputs.repo }}" -D "$RUNNER_TEMP/bundle"
           cat > "$RUNNER_TEMP/dec.js" <<'JS'
           const c=require('crypto'),fs=require('fs'),{spawn}=require('child_process');
           const [file,dir]=process.argv.slice(2);
@@ -388,5 +386,5 @@ jobs:
       - name: Yerel paket release'ini sil
         if: always() && inputs.bundle_tag != ''
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release delete "${{ inputs.bundle_tag }}" -R "${{ github.repository }}" --cleanup-tag -y || true
+          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+        run: gh release delete "${{ inputs.bundle_tag }}" -R "${{ inputs.repo }}" --cleanup-tag -y || true

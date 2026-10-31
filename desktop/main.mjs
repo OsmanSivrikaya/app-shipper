@@ -1472,6 +1472,14 @@ async function shipLocalBundle(folder, user, payload, shipper) {
   if (isUnityProject(folder)) xcodeDir = await buildUnityXcode(folder)
   if (!hasXcodeProject(xcodeDir)) throw new Error('Seçilen klasörde Unity projesi veya .xcodeproj yok.')
 
+  // Paket, GitHub'ın public olabilecek shipper reposuna değil, projenin kendi (özel) reposuna release olarak yüklenir
+  const projectName = (payload.projectName || path.basename(isUnityProject(folder) ? path.dirname(folder) : folder)).toLowerCase().replace(/[^a-z0-9-_]/g, '-')
+  let repo = `${user}/${projectName}`
+  try {
+    const url = (await gitOut(folder, ['remote', 'get-url', 'origin'])).trim()
+    const mt = url.match(/github\.com[:/]+([^/]+\/[^/]+?)(?:\.git)?$/)
+    if (mt) repo = mt[1]
+  } catch { /* git yok: varsayılan ad */ }
   const tag = `local-${Date.now()}`
   const archive = path.join(os.tmpdir(), `${tag}.tgz`)
   sendShipEvent({ phase: 'sync', message: 'Xcode projesi sıkıştırılıyor...' })
@@ -1497,13 +1505,11 @@ async function shipLocalBundle(folder, user, payload, shipper) {
   const mb = Math.round(fs.statSync(encrypted).size / 1048576)
   sendShipEvent({ phase: 'sync', message: `Buluta yükleniyor (${mb} MB)...` })
   try {
-    await ghAsync(['release', 'create', tag, encrypted, '-R', shipper, '--title', tag, '--notes', 'App Shipper geçici yerel paket (iş bitince silinir)'], { timeout: 60 * 60 * 1000 })
+    await ghAsync(['release', 'create', tag, encrypted, '-R', repo, '--title', tag, '--notes', 'App Shipper geçici yerel paket (iş bitince silinir)'], { timeout: 60 * 60 * 1000 })
   } finally {
     try { fs.rmSync(encrypted) } catch { /* ignore */ }
   }
 
-  const projectName = (payload.projectName || path.basename(isUnityProject(folder) ? path.dirname(folder) : folder)).toLowerCase().replace(/[^a-z0-9-_]/g, '-')
-  const repo = `${user}/${projectName}`
   const run = await triggerWorkflowAndFindRun(shipper, {
     repo,
     platforms: 'ios',
