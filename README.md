@@ -42,9 +42,17 @@
 - [FAQ](#faq)
 
 ## What is it?
-App Shipper builds, signs and uploads your app in the cloud using **GitHub Actions** (macOS runner for iOS, Linux runner for Android). Your computer can be off, you can be on **Windows**, and there is no Expo/EAS queue.
+**The problem.** To put an iPhone app on TestFlight (Apple's beta-testing service) you must build, sign and upload it from a Mac with Xcode. Google Play needs a signed Android bundle. If you work on Windows, or just don't want to fiddle with certificates, that is a wall.
 
-Supported project types (detected automatically): **Capacitor**, **Expo / React Native**, **Flutter**, **native Android & iOS**.
+**What App Shipper does.** You pick your project folder in a desktop app and press one button. App Shipper hands the work to **GitHub Actions** (build servers run by GitHub: a Mac for iOS, a Linux machine for Android). They build the app, sign it with the keys you gave once, and upload it to TestFlight / Google Play. Your computer can be off and you never need a Mac.
+
+**Key words**
+- **TestFlight**: Apple's way to send a test build to your phone before the public release.
+- **Google Play internal track**: the same idea on Android.
+- **GitHub Actions**: GitHub's build servers. App Shipper uses your own copy of this repo as the "shipper repo" that runs the builds.
+- **Secrets**: keys and certificates stored encrypted in GitHub, never in your code.
+
+Supported project types (detected automatically): **Capacitor**, **Expo / React Native**, **Flutter**, **native Android & iOS**, and **Unity (iOS)**.
 
 ```
 You ──► App Shipper Studio ──► GitHub Actions (your own copy of this repo)
@@ -87,10 +95,10 @@ _The interface is currently in Turkish. Screenshots use demo data._
 </table>
 
 ## How it works
-1. The desktop app pushes your project to GitHub (or uses the repo it already has).
-2. It triggers the `ship.yml` workflow in **your** app-shipper repo.
-3. GitHub builds on a fresh runner, signs with the secrets you stored, and uploads to the stores.
-4. The app polls the run and shows live steps, percentage and estimated time left.
+1. **You** choose the project folder and press *Send to Apple* (or Google).
+2. The desktop app pushes your code to GitHub (for Unity it uploads a build instead, see below) and starts the `ship.yml` workflow in **your** app-shipper repo.
+3. GitHub builds on a fresh server, signs with the secrets you stored, and uploads to the store.
+4. The app watches the run and shows live steps, percentage and estimated time left. You get a notification when it is done.
 
 ## Quick start (Desktop app)
 
@@ -228,13 +236,30 @@ Per-project settings:
 | `ship play key.json` | Upload/refresh the Google Play service-account key |
 
 ## Unity projects (iOS)
-Unity can't be built in the cloud without a Unity licence, and iOS signing needs macOS. So the Unity step runs **on your computer** and only the signing/upload runs on the cloud Mac:
-1. Choose the **Unity project folder** (the one containing `Assets/` and `ProjectSettings/`) as the iOS folder. Choosing an already generated Xcode folder (e.g. `Builds/iOS`) skips the Unity build.
-2. The Desktop app runs Unity in batch mode (`unity.iosMethod` from `ship.json`) and produces the Xcode project. The editor defaults to the project's version (`ProjectSettings/ProjectVersion.txt`); set `unity.editor` (a version or a full path) to override it. If that version isn't installed you are asked to pick a Unity executable. Close the Unity Editor first, the project can't be open twice.
-3. The Xcode project is compressed, **encrypted with AES-256** and uploaded as a temporary release of the project's own (private) GitHub repo. The random key is stored only in the `BUNDLE_KEY` secret of your shipper repo.
-4. The cloud Mac downloads and decrypts it, signs it and uploads to TestFlight, then deletes the release.
+**Why Unity is different.** A normal app is built from its source code on the cloud Mac. A Unity game can't be: building it needs the Unity Editor (and a Unity licence), which the cloud server doesn't have. So the work is split:
 
-Needs: write access to the project repo for your GitHub account / `SOURCE_TOKEN`. Android for Unity isn't supported yet.
+```
+Your PC (Windows)                              Cloud Mac (GitHub Actions)
+─────────────────                              ──────────────────────────
+1. Unity builds the Xcode project  ──┐
+2. zip + encrypt it (AES-256)         ├──►     3. download + decrypt
+   upload to your PRIVATE game repo ──┘         4. Xcode signs it
+                                                5. upload to TestFlight
+                                                6. delete the temporary upload
+```
+
+**How to use it**
+1. In the project, choose the **Unity project folder** (the folder that contains `Assets/` and `ProjectSettings/`) as the iOS folder. If you already generated the Xcode project (e.g. `Builds/iOS`), choose that instead and step 1 above is skipped.
+2. Close the Unity Editor. A project can't be open in two Unity instances.
+3. Press *Send to Apple*. App Shipper runs Unity in the background (a few minutes), then uploads and ships.
+
+**Settings** (`ship.json` in your project root or its parent folder):
+- `unity.iosMethod`: the C# build method Unity should run (required), e.g. `MyGame.Editor.BuildScript.BuildIOS`. It must write the Xcode project to `Builds/iOS`.
+- `unity.editor`: optional, a Unity version or the full path to `Unity.exe`. By default the version written in `ProjectSettings/ProjectVersion.txt` is used; if it isn't installed you get a file picker.
+
+**Safety.** The Xcode project contains your game code, so it is never put in the (possibly public) shipper repo. It is encrypted and stored as a temporary release of your own private game repo; the key lives only in the `BUNDLE_KEY` secret. The release is deleted when the run ends.
+
+**Requirements.** Unity (with iOS Build Support) on your PC, an Apple Developer account, and a GitHub token that can write to the game repo. Android for Unity is not supported yet.
 
 ## Project config: `ship.json`
 Auto-detection is usually enough. Otherwise put this in your project root (all fields optional):
@@ -321,9 +346,17 @@ On Windows, if `electron-builder` fails extracting `winCodeSign` (symlink error)
 - [Sık sorulanlar](#sık-sorulanlar)
 
 ## Nedir?
-App Shipper, uygulamanı **GitHub Actions** üzerinde (iOS için macOS, Android için Linux sunucusu) derler, imzalar ve mağazaya yükler. Bilgisayarın kapalı olabilir, **Windows** kullanabilirsin, Expo/EAS kuyruğu yoktur.
+**Sorun.** Bir iPhone uygulamasını TestFlight'a (Apple'ın test dağıtım servisi) koymak için uygulamayı Xcode'lu bir **Mac'te** derleyip imzalayıp yüklemen gerekir. Google Play için de imzalı bir Android paketi lazım. Windows kullanıyorsan ya da sertifikalarla uğraşmak istemiyorsan bu bir duvar.
 
-Desteklenen proje tipleri (otomatik bulunur): **Capacitor**, **Expo / React Native**, **Flutter**, **native Android ve iOS**.
+**App Shipper ne yapar.** Masaüstü uygulamada proje klasörünü seçip tek düğmeye basarsın. App Shipper işi **GitHub Actions**'a (GitHub'ın derleme sunucuları: iOS için bir Mac, Android için bir Linux makine) verir. Onlar uygulamayı derler, bir kere verdiğin anahtarlarla imzalar ve TestFlight / Google Play'e yükler. Bilgisayarın kapalı olabilir, Mac'e ihtiyacın yok.
+
+**Kısa sözlük**
+- **TestFlight**: Apple'ın, uygulamayı yayına almadan önce test sürümünü telefonuna göndermesi.
+- **Google Play internal (dahili) kanal**: Android'de aynı fikir.
+- **GitHub Actions**: GitHub'ın derleme sunucuları. App Shipper, bu reponun **senin kendi kopyanı** derlemeleri çalıştıran "shipper reposu" olarak kullanır.
+- **Secrets**: anahtarlar ve sertifikalar. GitHub'da şifreli saklanır, kodunda durmaz.
+
+Desteklenen proje tipleri (otomatik bulunur): **Capacitor**, **Expo / React Native**, **Flutter**, **native Android ve iOS**, ayrıca **Unity (iOS)**.
 
 ```
 Sen ──► App Shipper Studio ──► GitHub Actions (bu reponun kendi kopyan)
@@ -366,10 +399,10 @@ _Arayüz şu an Türkçe. Görüntüler demo verisiyle alınmıştır._
 </table>
 
 ## Nasıl çalışır?
-1. Masaüstü uygulaması projeni GitHub'a gönderir (zaten repon varsa onu kullanır).
-2. **Senin** app-shipper reponda `ship.yml` iş akışını tetikler.
-3. GitHub temiz bir sunucuda derler, sakladığın secret'larla imzalar ve mağazalara yükler.
-4. Uygulama çalışmayı izler, canlı adımları, yüzdeyi ve tahmini kalan süreyi gösterir.
+1. **Sen** proje klasörünü seçip *Apple'a Gönder*'e (ya da Google'a) basarsın.
+2. Masaüstü uygulama kodunu GitHub'a gönderir (Unity için bir build yükler, aşağıya bak) ve **senin** app-shipper reponda `ship.yml` iş akışını başlatır.
+3. GitHub, yeni bir sunucuda derler, sakladığın secret'larla imzalar ve mağazaya yükler.
+4. Uygulama koşuyu izler; canlı adımları, yüzdeyi ve kalan süreyi gösterir. Bitince bildirim gelir.
 
 ## Hızlı başlangıç (Masaüstü uygulaması)
 
@@ -507,13 +540,30 @@ Projeye özel ayarlar:
 | `ship play anahtar.json` | Google Play service account anahtarını yükler/yeniler |
 
 ## Unity projeleri (iOS)
-Unity, lisans olmadan bulutta derlenemez; iOS imzalama ise macOS ister. Bu yüzden Unity adımı **kendi bilgisayarında** çalışır, bulut Mac'e yalnızca imzalama ve yükleme kalır:
-1. iOS klasörü olarak **Unity proje klasörünü** seç (`Assets/` ve `ProjectSettings/` içeren). Daha önce üretilmiş bir Xcode klasörünü (ör. `Builds/iOS`) seçersen Unity build'i atlanır.
-2. Masaüstü uygulaması Unity'yi batch modda çalıştırıp (`ship.json` içindeki `unity.iosMethod`) Xcode projesini üretir. Editör varsayılan olarak projenin sürümüdür (`ProjectSettings/ProjectVersion.txt`); değiştirmek için `unity.editor` yaz (sürüm ya da tam yol). O sürüm kurulu değilse bir Unity programı seçmen istenir. Önce Unity Editor'ü kapat, proje iki kez açılamaz.
-3. Xcode projesi sıkıştırılır, **AES-256 ile şifrelenir** ve projenin kendi (özel) GitHub reposuna geçici release olarak yüklenir. Rastgele anahtar yalnızca shipper reposunun `BUNDLE_KEY` secret'ında durur.
-4. Bulut Mac paketi indirip çözer, imzalar, TestFlight'a yükler ve release'i siler.
+**Unity neden farklı?** Normal bir uygulama, kaynak koddan bulut Mac'te derlenir. Unity oyunu derlenemez: bunun için Unity Editor (ve Unity lisansı) gerekir, bulut sunucuda yok. Bu yüzden iş ikiye bölünür:
 
-Gerekenler: GitHub hesabının / `SOURCE_TOKEN`'ın proje reposuna yazma izni. Unity için Android henüz desteklenmiyor.
+```
+Senin PC'n (Windows)                           Bulut Mac (GitHub Actions)
+────────────────────                           ──────────────────────────
+1. Unity Xcode projesini üretir    ──┐
+2. sıkıştır + şifrele (AES-256)       ├──►     3. indir + şifreyi çöz
+   ÖZEL oyun reponuza yükle        ──┘         4. Xcode imzalar
+                                               5. TestFlight'a yükle
+                                               6. geçici yüklemeyi sil
+```
+
+**Nasıl kullanılır**
+1. Projede iOS klasörü olarak **Unity proje klasörünü** seç (`Assets/` ve `ProjectSettings/` içeren klasör). Xcode projesini zaten ürettiysen (ör. `Builds/iOS`) onu seç, yukarıdaki 1. adım atlanır.
+2. Unity Editor'ü kapat. Bir proje iki Unity'de birden açılamaz.
+3. *Apple'a Gönder*'e bas. App Shipper arka planda Unity'yi çalıştırır (birkaç dakika), sonra yükler ve gönderir.
+
+**Ayarlar** (projenin kökündeki ya da bir üstündeki klasördeki `ship.json`):
+- `unity.iosMethod`: Unity'nin çalıştıracağı C# build metodu (zorunlu), ör. `MyGame.Editor.BuildScript.BuildIOS`. Xcode projesini `Builds/iOS`'a yazmalı.
+- `unity.editor`: opsiyonel, Unity sürümü ya da `Unity.exe`'nin tam yolu. Varsayılan olarak `ProjectSettings/ProjectVersion.txt`'deki sürüm kullanılır; kurulu değilse dosya seçme penceresi açılır.
+
+**Güvenlik.** Xcode projesi oyun kodunu içerir; bu yüzden (public olabilecek) shipper reposuna hiç konmaz. Şifrelenir ve kendi özel oyun reponun geçici bir release'i olarak durur; anahtar yalnızca `BUNDLE_KEY` secret'ındadır. Koşu bitince release silinir.
+
+**Gerekenler.** PC'de Unity (iOS Build Support ile), Apple Developer hesabı ve oyun reposuna yazabilen bir GitHub token'ı. Unity için Android henüz desteklenmiyor.
 
 ## Proje ayarı: `ship.json`
 Otomatik tespit çoğu zaman yeter. Yanılırsa projenin köküne koy (hepsi opsiyonel):
