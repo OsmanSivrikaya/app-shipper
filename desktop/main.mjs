@@ -39,6 +39,14 @@ function createWindow() {
   })
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'))
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.setAlwaysOnTop(true)
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false)
+    }, 1200)
+  })
 }
 
 app.whenReady().then(() => {
