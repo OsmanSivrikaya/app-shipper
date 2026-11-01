@@ -1639,7 +1639,12 @@ ipcMain.handle('ship:start', async (_e, payload) => {
   // Unity projesi / hazır Xcode klasörü: GitHub'a değil, yerelde derleyip paket olarak gönder
   if (platforms !== 'android' && (isUnityProject(targetFolder) || hasXcodeProject(targetFolder))) {
     await syncPromise
-    return await shipLocalBundle(targetFolder, user, payload, shipper)
+    try {
+      return await shipLocalBundle(targetFolder, user, payload, shipper)
+    } catch (e) {
+      recordLocalError(payload.projectId, payload.projectName, e)
+      throw e
+    }
   }
 
   const synced = await syncFolderToGitHub(targetFolder, user, payload.autoSyncGit)
@@ -1802,6 +1807,16 @@ ipcMain.handle('ship:cancelRun', async (_e, { runIds, runId }) => {
   return true
 })
 
+// Bilgisayarda (Unity build, sıkıştırma, yükleme) çıkan hatalar GitHub'a hiç ulaşmaz; "Son hatalar" kartı için saklanır.
+function recordLocalError(projectId, projectName, err) {
+  try {
+    const cfg = loadConfig()
+    const lines = String((err && err.message) || err).split('\n').map((l) => l.trim()).filter(Boolean).map((l) => l.slice(0, 260)).slice(0, 8)
+    cfg.localErrors = [{ at: new Date().toISOString(), projectId: projectId || '', projectName: projectName || '', lines }, ...(cfg.localErrors || [])].slice(0, 20)
+    saveConfig(cfg)
+  } catch { /* ignore */ }
+}
+
 // ── Son hatalar (7 gün): GitHub Actions'a girmeden hatanın özeti ──
 const ERR_CACHE = new Map() // runId → özet (biten koşunun logu değişmez)
 const ANSI = /\u001b?\[(?:\d{1,3}(?:;\d{1,3})*)m/g
@@ -1867,6 +1882,12 @@ ipcMain.handle('ship:recentErrors', async (_e, { projectId, projectName, days = 
     const meta = runMeta[id] || {}
     out.push({ runId: r.databaseId, createdAt: r.createdAt, url: r.url, title: r.displayTitle, version: meta.version || '', ...ERR_CACHE.get(id) })
   }
+  for (const le of cfg.localErrors || []) {
+    if (Date.parse(le.at) < since) continue
+    if (le.projectId && projectId && le.projectId !== projectId) continue
+    out.push({ runId: null, createdAt: le.at, url: '', title: '', version: '', step: 'Bilgisayarda: Unity build / paketleme / yükleme', lines: le.lines })
+  }
+  out.sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt))
   return out
 })
 

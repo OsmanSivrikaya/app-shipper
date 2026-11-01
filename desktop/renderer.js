@@ -400,7 +400,8 @@ async function loadRecentErrors() {
     open.className = 'btn-chip'
     open.textContent = 'GitHub\'da aç'
     open.addEventListener('click', () => window.shipperAPI.openExternal(it.url))
-    actions.append(copy, open)
+    actions.append(copy)
+    if (it.url) actions.append(open)
     body.append(pre, actions)
     d.append(sum, body)
     list.append(d)
