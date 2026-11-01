@@ -5,8 +5,24 @@
 # Otomatik tespit yetmezse proje reposunun köküne ship.json koy (hepsi opsiyonel):
 # { "appPath": "frontend", "prepare": "npm run build:mobile",
 #   "android": { "dir": "android", "task": "bundleRelease" },
-#   "ios": { "dir": "ios/App", "scheme": "App" } }
+#   "ios": { "dir": "ios/App", "scheme": "App" },
+#   "unity": { "iosMethod": "Namespace.Sinif.Metot" } }   # Unity projesi: Xcode projesi Builds/iOS'a üretilir
 set -euo pipefail
+
+# Yerel paket modu (Desktop Unity/Xcode klasörünü release olarak yükledi): kaynak repo yok, aranacak bir şey yok.
+if [ -n "${BUNDLE_TAG:-}" ]; then
+  BUILD_NUMBER=$(( 10#$(date -u +%y%j%H%M) ))
+  SLUG="$(echo "${REPO:-app}" | sed 's#.*/##' | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]/_/g')"
+  {
+    echo "app_dir=."; echo "type=native"; echo "pm=npm"; echo "node_version="; echo "java_version=17"
+    echo "android_dir=android"; echo "ios_dir=_xcode"; echo "has_android=false"; echo "has_ios=true"
+    echo "ios_scheme="; echo "android_task="; echo "prepare_cmd="; echo "build_number=$BUILD_NUMBER"
+    echo "unity_prebuilt=true"; echo "unity_version="; echo "unity_ios_method="
+    echo "slug=$SLUG"; echo "npm_lock="
+  } | tee -a "${GITHUB_OUTPUT:-/dev/null}"
+  exit 0
+fi
+
 cd "$1"
 ROOT="$(pwd)"
 
@@ -22,6 +38,7 @@ type_of() {
   if compgen -G "$d/capacitor.config.*" >/dev/null; then echo capacitor; return; fi
   if has_dep "$d" expo; then echo expo; return; fi
   if has_dep "$d" react-native; then echo react-native; return; fi
+  if [ -f "$d/ProjectSettings/ProjectVersion.txt" ] && [ -d "$d/Assets" ]; then echo unity; return; fi
   if [ -f "$d/gradlew" ] || [ -f "$d/android/gradlew" ] || compgen -G "$d/*.xcodeproj" >/dev/null || compgen -G "$d/ios/*.xcodeproj" >/dev/null; then
     echo native; return
   fi
@@ -56,6 +73,7 @@ case "$TYPE" in
     [ -f gradlew ] && ANDROID_DIR=.
     proj="$(find . -maxdepth 2 -name '*.xcodeproj' -not -path '*/Pods/*' | head -1)"
     [ -n "$proj" ] && IOS_DIR="$(dirname "$proj")" ;;
+  unity) IOS_DIR=Builds/iOS ;;   # Unity işi üretir, macOS işi buradan alır
 esac
 [ -n "$CFG_ANDROID_DIR" ] && ANDROID_DIR="$CFG_ANDROID_DIR"
 [ -n "$CFG_IOS_DIR" ] && IOS_DIR="$CFG_IOS_DIR"
@@ -65,10 +83,21 @@ HAS_ANDROID=false; HAS_IOS=false
 case "$TYPE" in
   expo) HAS_ANDROID=true; HAS_IOS=true ;;                       # yoksa prebuild üretir
   flutter|capacitor) [ -d android ] && HAS_ANDROID=true; [ -d ios ] && HAS_IOS=true ;;
+  unity) HAS_IOS=true ;;                                        # Android (AAB) henüz yok
   *)
     [ -f "$ANDROID_DIR/gradlew" ] && HAS_ANDROID=true
     compgen -G "$IOS_DIR/*.xcodeproj" >/dev/null && HAS_IOS=true ;;
 esac
+
+# Unity: editör sürümü ve iOS build metodu (ship.json → unity.iosMethod)
+UNITY_VERSION=""; UNITY_IOS_METHOD=""; UNITY_PREBUILT=false
+if [ "$TYPE" = unity ]; then
+  UNITY_VERSION="$(sed -nE 's/^m_EditorVersion: *([0-9a-z.]+).*/\1/p' ProjectSettings/ProjectVersion.txt | head -1)"
+  UNITY_IOS_METHOD="$(cfg .unity.iosMethod)"
+  # Xcode projesi repoda hazırsa (yerelde Unity ile üretilip commit'lenmiş) bulutta Unity çalıştırılmaz
+  UNITY_PREBUILT=false
+  compgen -G "$IOS_DIR/*.xcodeproj" >/dev/null && UNITY_PREBUILT=true
+fi
 
 # ── paket yöneticisi / node / java ──
 PM=npm; NODE=""
@@ -110,6 +139,9 @@ SLUG="$(echo "${REPO:-app}" | sed 's#.*/##' | tr '[:lower:]' '[:upper:]' | sed '
   echo "android_task=$(cfg .android.task)"
   echo "prepare_cmd=$(cfg .prepare)"
   echo "build_number=$BUILD_NUMBER"
+  echo "unity_prebuilt=$UNITY_PREBUILT"
+  echo "unity_version=$UNITY_VERSION"
+  echo "unity_ios_method=$UNITY_IOS_METHOD"
   echo "slug=$SLUG"
   echo "npm_lock=$NPM_LOCK"
 } | tee -a "${GITHUB_OUTPUT:-/dev/null}"
