@@ -1490,7 +1490,7 @@ async function shipLocalBundle(folder, user, payload, shipper) {
   sendShipEvent({ phase: 'sync', message: 'Xcode projesi sıkıştırılıyor...' })
   // Windows'ta PATH'teki Git tar'ı "C:" yolunu uzak makine sanır; sistemin bsdtar'ını kullan
   const tarBin = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar'
-  await execFileAsync(tarBin, ['-czf', archive, '--exclude=*BurstDebugInformation_DoNotShip', '-C', xcodeDir, '.'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
+  await execFileAsync(tarBin, ['--options', 'gzip:compression-level=1', '-czf', archive, '--exclude=*BurstDebugInformation_DoNotShip', '-C', xcodeDir, '.'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
   // shipper reposu public olabilir: paket AES-256 ile şifrelenir, anahtar yalnızca repo secret'ında (BUNDLE_KEY) durur
   sendShipEvent({ phase: 'sync', message: 'Paket şifreleniyor...' })
   const key = crypto.randomBytes(32)
