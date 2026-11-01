@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('shipperAPI', {
   cancelRun: (payload) => ipcRenderer.invoke('ship:cancelRun', payload),
   getFailedLogs: (payload) => ipcRenderer.invoke('ship:getFailedLogs', payload),
   getHistory: () => ipcRenderer.invoke('ship:history'),
+  getRecentErrors: (payload) => ipcRenderer.invoke('ship:recentErrors', payload),
 
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath: (folderPath) => ipcRenderer.invoke('shell:openPath', folderPath),

@@ -1859,3 +1859,17 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeSpeed; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .skeleton::after, .skel-text::after { display: none; }
 }
+
+/* ─────────────────── Son hatalar (7 gün) ─────────────────── */
+.recent-errors { margin-top: 18px; }
+.recent-errors-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; color: #fca5a5; margin-bottom: 8px; }
+.recent-errors-head small { color: var(--text-muted, #8b93a7); font-weight: 400; }
+.err-item { background: #0d0f16; border: 1px solid #3b1d1d; border-radius: 8px; margin-bottom: 8px; }
+.err-item summary { cursor: pointer; padding: 9px 12px; display: flex; gap: 10px; align-items: baseline; font-size: 12.5px; list-style: none; }
+.err-item summary::-webkit-details-marker { display: none; }
+.err-when { color: var(--text-muted, #8b93a7); font-size: 11.5px; white-space: nowrap; }
+.err-step { color: #e5e7eb; font-weight: 600; }
+.err-body { padding: 0 12px 10px; }
+.err-body pre { font-size: 11px; white-space: pre-wrap; user-select: text; margin: 0 0 8px; color: #d1d5db; max-height: 180px; overflow: auto; }
+.err-actions { display: flex; gap: 8px; }
+.err-empty { font-size: 12.5px; color: var(--text-muted, #8b93a7); padding: 6px 2px; }

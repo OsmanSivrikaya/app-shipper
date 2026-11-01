@@ -342,10 +342,73 @@ async function selectProject(id) {
   $('inpBuildNumber').placeholder = `Otomatik (#${proj.buildNumber || '1'})`
 
   updateWorkspacePipelineUI()
+  loadRecentErrors()
   refreshStoreStatus()
 }
 
 // Canlı App Store Connect Sürüm & Build Sorgusu
+const relTime = (iso) => {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000)
+  if (m < 1) return 'az önce'
+  if (m < 60) return `${m} dk önce`
+  if (m < 1440) return `${Math.round(m / 60)} sa önce`
+  return `${Math.round(m / 1440)} gün önce`
+}
+
+async function loadRecentErrors() {
+  const proj = state.projects.find((p) => p.id === state.activeProjectId)
+  const box = $('recentErrorsBox')
+  if (!proj) return box.classList.add('hidden')
+  const token = (state.errToken = (state.errToken || 0) + 1)
+  box.classList.remove('hidden')
+  const list = $('recentErrorsList')
+  list.innerHTML = '<div class="err-empty">Yükleniyor...</div>'
+  let items = []
+  try {
+    items = await window.shipperAPI.getRecentErrors({ projectId: proj.id, projectName: proj.name, days: 7 })
+  } catch { /* ignore */ }
+  if (token !== state.errToken) return
+  list.innerHTML = ''
+  if (!items.length) {
+    list.innerHTML = '<div class="err-empty">Son 7 günde hata yok.</div>'
+    return
+  }
+  for (const it of items) {
+    const d = document.createElement('details')
+    d.className = 'err-item'
+    const sum = document.createElement('summary')
+    const when = document.createElement('span')
+    when.className = 'err-when'
+    when.textContent = relTime(it.createdAt)
+    const step = document.createElement('span')
+    step.className = 'err-step'
+    step.textContent = it.step || 'Hata'
+    sum.append(when, step)
+    const body = document.createElement('div')
+    body.className = 'err-body'
+    const pre = document.createElement('pre')
+    pre.textContent = it.lines && it.lines.length ? it.lines.join('\n') : 'Ayrıntı alınamadı; GitHub\'da aç.'
+    const actions = document.createElement('div')
+    actions.className = 'err-actions'
+    const copy = document.createElement('button')
+    copy.type = 'button'
+    copy.className = 'btn-chip'
+    copy.textContent = 'Kopyala'
+    copy.addEventListener('click', () => { navigator.clipboard.writeText(`${it.step}\n${pre.textContent}`); showToast('Hata kopyalandı', 'success') })
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'btn-chip'
+    open.textContent = 'GitHub\'da aç'
+    open.addEventListener('click', () => window.shipperAPI.openExternal(it.url))
+    actions.append(copy, open)
+    body.append(pre, actions)
+    d.append(sum, body)
+    list.append(d)
+  }
+}
+
+$('btnRefreshErrors').addEventListener('click', loadRecentErrors)
+
 async function refreshStoreStatus() {
   const proj = state.projects.find((p) => p.id === state.activeProjectId)
   if (!proj || !proj.iosEnabled) return

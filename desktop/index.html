@@ -422,6 +422,15 @@
               <svg class="send-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
           </div>
+
+          <!-- Son hatalar (7 gün) -->
+          <div class="recent-errors hidden" id="recentErrorsBox">
+            <div class="recent-errors-head">
+              <span>Son hatalar <small>(7 gün)</small></span>
+              <button type="button" class="btn-chip" id="btnRefreshErrors">Yenile</button>
+            </div>
+            <div id="recentErrorsList"></div>
+          </div>
         </div>
       </section>
 

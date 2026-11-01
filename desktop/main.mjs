@@ -1802,6 +1802,74 @@ ipcMain.handle('ship:cancelRun', async (_e, { runIds, runId }) => {
   return true
 })
 
+// ── Son hatalar (7 gün): GitHub Actions'a girmeden hatanın özeti ──
+const ERR_CACHE = new Map() // runId → özet (biten koşunun logu değişmez)
+const ANSI = /\u001b?\[(?:\d{1,3}(?:;\d{1,3})*)m/g
+
+function summarizeFailedLog(raw) {
+  const NOISE = /^(export |cd |builtin|setenv|\/Applications|\/Users\/runner\/.*clang|"\/)/
+  const STRONG = /(##\[error\]|^\[!\]|\berror:|Undefined symbols|_OBJC_|referenced from|^in \w+\.o|^ld:|symbol\(s\) not found|ARCHIVE FAILED|\bMissing\b|Application Loader|\(\d{5}\)|No such file|Permission denied|Could not)/i
+  const picked = []
+  const seen = new Set()
+  for (const line of String(raw).split('\n')) {
+    // "iş<TAB>adım<TAB>zaman metin" biçimi → yalnızca metin
+    const text = line.split('\t').slice(2).join(' ').replace(/^\S+Z\s/, '').replace(ANSI, '').replace(/^\[\d\d:\d\d:\d\d\]:\s*/, '').replace(/^▸\s*/, '').trim()
+    if (!text || NOISE.test(text) || /Process completed with exit code/i.test(text)) continue
+    if (!STRONG.test(text)) continue
+    const short = text.replace(/^##\[error\]/, '').slice(0, 260)
+    if (seen.has(short)) continue
+    seen.add(short)
+    picked.push(short)
+    if (picked.length >= 6) break
+  }
+  return picked
+}
+
+ipcMain.handle('ship:recentErrors', async (_e, { projectId, projectName, days = 7 } = {}) => {
+  const shipper = getShipperRepo()
+  if (!shipper) return []
+  const cfg = loadConfig()
+  const runMeta = cfg.runMeta || {}
+  const projects = cfg.projects || []
+  const since = Date.now() - days * 86400000
+  const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  let list = []
+  try {
+    list = JSON.parse(await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '100', '--json', 'databaseId,displayTitle,conclusion,createdAt,url']))
+  } catch { return [] }
+
+  const failed = list
+    .filter((r) => r.conclusion === 'failure' && Date.parse(r.createdAt) >= since)
+    .filter((r) => {
+      const meta = runMeta[String(r.databaseId)] || {}
+      if (meta.projectId) return meta.projectId === projectId
+      if (projects.length <= 1) return true
+      return norm(r.displayTitle).includes(norm(projectName))
+    })
+    .slice(0, 8)
+
+  const out = []
+  for (const r of failed) {
+    const id = String(r.databaseId)
+    if (!ERR_CACHE.has(id)) {
+      let step = ''
+      try {
+        const jobs = JSON.parse(await ghAsync(['run', 'view', id, '-R', shipper, '--json', 'jobs'])).jobs || []
+        for (const j of jobs) {
+          const fs2 = (j.steps || []).find((st) => st.conclusion === 'failure')
+          if (fs2) { step = `${j.name} → ${fs2.name}`; break }
+        }
+      } catch { /* ignore */ }
+      let lines = []
+      try { lines = summarizeFailedLog(await ghAsync(['run', 'view', id, '-R', shipper, '--log-failed'])) } catch { /* ignore */ }
+      ERR_CACHE.set(id, { step, lines })
+    }
+    const meta = runMeta[id] || {}
+    out.push({ runId: r.databaseId, createdAt: r.createdAt, url: r.url, title: r.displayTitle, version: meta.version || '', ...ERR_CACHE.get(id) })
+  }
+  return out
+})
+
 ipcMain.handle('ship:getFailedLogs', async (_e, { runId }) => {
   const shipper = getShipperRepo()
   try {
