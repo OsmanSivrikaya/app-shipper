@@ -7,13 +7,7 @@ const state = {
   googleProfiles: [],
   hasDefaultApple: false,
   hasDefaultGoogle: false,
-  activeRunIds: [],
-  activeRunUrl: '',
-  isBuildRunning: false,
   isBuildMinimized: false,
-  pollTimer: null,
-  elapsedTimer: null,
-  startTime: 0,
   lastStoreStatus: null,
 }
 
@@ -876,6 +870,7 @@ $('formAppleAccount').addEventListener('submit', async (e) => {
     refreshStoreStatus()
     showToast(`"${res.profile.label}" (Team: ${res.profile.teamId}) kaydedildi`, 'success')
     $('formAppleAccount').reset()
+    $('apIsDefault').checked = !state.appleProfiles.some((p) => p.isDefault)
   } catch (err) {
     showToast(err.message, 'error')
   } finally {
@@ -941,6 +936,7 @@ $('formGoogleAccount').addEventListener('submit', async (e) => {
     renderAccountSelectors()
     showToast(`"${res.profile.label}" kaydedildi`, 'success')
     $('formGoogleAccount').reset()
+    $('gpIsDefault').checked = !state.googleProfiles.some((p) => p.isDefault)
   } catch (err) {
     showToast(err.message, 'error')
   } finally {
@@ -969,43 +965,250 @@ $('formGeneralSettings').addEventListener('submit', async (e) => {
   }
 })
 
-// ─────────────────── GÖNDERİM & ARKA PLANDA DEVAM ETME (Background Continuation) ───────────────────
-
-window.shipperAPI.onShipEvent((ev) => {
-  $('overallStatusLabel').textContent = ev.message
-  $('minBarStatus').textContent = ev.message
+$('btnExportConfig').addEventListener('click', async () => {
+  try {
+    const r = await window.shipperAPI.exportConfig()
+    if (r) showToast(`Dışa aktarıldı: ${r.projects} proje, ${r.apple} Apple, ${r.google} Google hesabı`, 'success')
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
 })
+
+$('btnImportConfig').addEventListener('click', async () => {
+  try {
+    const r = await window.shipperAPI.importConfig()
+    if (!r) return
+    showToast(`İçe aktarıldı: ${r.projects} proje, ${r.apple} Apple, ${r.google} Google hesabı`, 'success')
+    setTimeout(() => location.reload(), 900)
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
+})
+
+// ─────────────────── GÖNDERİM & ARKA PLANDA DEVAM ETME (Çoklu eşzamanlı build) ───────────────────
+// Her build kendi nesnesinde yaşar; modal / mini çubuk / üst hap yalnızca odaktaki build'i çizer, sekmeler build'ler arasında geçirir.
+
+const MAX_PARALLEL_BUILDS = 3
+const builds = new Map() // id → build
+let focusedBuildId = null
+let buildSeq = 0
+
+const platformLabel = (p) => (p === 'ios' ? 'iOS' : p === 'android' ? 'Android' : 'iOS + Android')
+const platformSet = (p) => (p === 'both' ? ['ios', 'android'] : [p])
+const focusedBuild = () => builds.get(focusedBuildId) || null
+const runningBuilds = () => [...builds.values()].filter((b) => b.running)
+
+function buildTitle(b) {
+  const prefix = b.projectName ? `${b.projectName} · ` : ''
+  if (b.platforms === 'ios') return `${prefix}iOS → TestFlight`
+  if (b.platforms === 'android') return `${prefix}Android → Google Play`
+  return `${prefix}App Store & Google Play`
+}
+
+function createBuild(platforms, proj, runIds = []) {
+  const usedSlots = new Set(runningBuilds().map((x) => x.slot))
+  let slot = 1
+  while (usedSlots.has(slot) && slot < MAX_PARALLEL_BUILDS) slot++
+  const b = {
+    id: `b${++buildSeq}`,
+    slot,
+    platforms,
+    projectId: proj?.id || '',
+    projectName: proj?.name || '',
+    running: true,
+    runIds,
+    runUrl: '',
+    startTime: Date.now(),
+    elapsed: 0,
+    pct: 5,
+    phase: 'BAŞLATILIYOR',
+    status: 'Bağlanıyor...',
+    subtitle: 'Proje senkronize ediliyor ve bulut derleme sunucusu başlatılıyor...',
+    loader: '',
+    jobsHtml: skeletonRows(2),
+    failedLog: '',
+    canResume: false,
+    pollTimer: null,
+  }
+  b.title = buildTitle(b)
+  builds.set(b.id, b)
+  return b
+}
+
+function setBuildProgress(b, pct, status) {
+  b.pct = Math.max(0, Math.min(100, Math.round(pct)))
+  if (status) b.status = status
+}
+
+function removeBuild(b) {
+  if (b.pollTimer) clearInterval(b.pollTimer)
+  builds.delete(b.id)
+  if (focusedBuildId === b.id) focusedBuildId = [...builds.keys()].pop() || null
+}
+
+function buildTabsHtml() {
+  if (builds.size < 2) return ''
+  return [...builds.values()].map((b) => {
+    const cls = `${b.id === focusedBuildId ? 'active' : ''} ${b.running ? 'running' : b.loader}`
+    const short = `${b.projectName || 'Build'} · ${platformLabel(b.platforms)}`
+    const tail = b.running ? `${b.pct}%` : `<span class="build-tab-close" data-close-build="${b.id}" title="Sekmeyi kapat" style="cursor:pointer;padding:0 4px">✕</span>`
+    return `<button type="button" class="build-tab ${cls}" data-build="${b.id}" title="${escapeHtml(b.title)}"><span class="build-tab-dot"></span><span class="build-tab-name">${escapeHtml(short)}</span><span class="build-tab-pct">${tail}</span></button>`
+  }).join('')
+}
+
+let _lastTabsHtml = ''
+let _lastProgressSent = null
+function paintBuilds() {
+  const b = focusedBuild()
+  const running = runningBuilds()
+
+  // Sekmeler (modal + mini çubuk)
+  const tabs = buildTabsHtml()
+  if (tabs !== _lastTabsHtml) {
+    _lastTabsHtml = tabs
+    for (const id of ['buildTabs', 'minBuildTabs']) {
+      const el = $(id)
+      if (!el) continue
+      el.innerHTML = tabs
+      el.classList.toggle('hidden', !tabs)
+    }
+  }
+
+  // Üst hap + görev çubuğu ilerlemesi
+  const avgPct = running.length ? Math.round(running.reduce((a, x) => a + x.pct, 0) / running.length) : 0
+  if (!builds.size) $('topBuildPill').classList.add('hidden')
+  else $('topBuildPill').classList.remove('hidden')
+  $('topPillText').textContent = running.length > 1
+    ? `${running.length} build · ${avgPct}%`
+    : running.length === 1 ? `Derleniyor · ${avgPct}%`
+      : (b && b.loader === 'completed' ? 'Tamamlandı' : 'Durdu')
+  const sent = running.length ? Math.max(0.05, avgPct / 100) : -1
+  if (sent !== _lastProgressSent) {
+    _lastProgressSent = sent
+    window.shipperAPI.setProgress(sent)
+  }
+
+  if (!b) return
+  const safePct = Math.max(5, b.pct)
+  $('overallPctLabel').textContent = `${b.pct}%`
+  $('overallProgressBar').style.width = `${safePct}%`
+  $('minBarPct').textContent = `${b.pct}%`
+  $('minBarProgressFill').style.width = `${safePct}%`
+  $('overallStatusLabel').textContent = b.status
+  $('minBarStatus').textContent = b.status
+  $('shipPhaseTag').textContent = b.phase
+  $('shipModalTitle').textContent = b.title
+  $('minBarTitle').textContent = b.title
+  $('shipModalSubtitle').textContent = b.subtitle
+  for (const id of ['orbitalLoader', 'minBarSpinner']) {
+    const el = $(id)
+    el.className = id === 'orbitalLoader' ? 'spinner-lg' : 'spinner-sm'
+    if (b.loader) el.classList.add(b.loader)
+  }
+  if ($('liveJobsContainer').dataset.lastHtml !== b.jobsHtml) {
+    $('liveJobsContainer').dataset.lastHtml = b.jobsHtml
+    $('liveJobsContainer').innerHTML = b.jobsHtml
+  }
+  $('btnResumeShip').classList.toggle('hidden', !b.canResume)
+  $('failedLogBox').classList.toggle('hidden', !b.failedLog)
+  $('failedLogPre').textContent = b.failedLog
+  setCancelButtonsVisible(b.running)
+  $('btnHideOverlayText').textContent = b.running ? 'Arka Planda Devam Et' : 'Kapat'
+  const t = formatSec(b.running ? (Date.now() - b.startTime) / 1000 : b.elapsed)
+  $('shipElapsedTimer').textContent = t
+  $('minBarTimer').textContent = t
+}
+
+setInterval(() => {
+  const b = focusedBuild()
+  if (!b || !b.running) return
+  const t = formatSec((Date.now() - b.startTime) / 1000)
+  $('shipElapsedTimer').textContent = t
+  $('minBarTimer').textContent = t
+}, 1000)
+
+function focusBuild(id) {
+  if (!builds.has(id)) return
+  focusedBuildId = id
+  paintBuilds()
+}
+
+function openBuildOverlay(id) {
+  if (id) focusedBuildId = id
+  state.isBuildMinimized = false
+  $('shippingOverlay').classList.remove('hidden')
+  $('minimizedBuildBar').classList.add('hidden')
+  paintBuilds()
+}
 
 function minimizeBuildToBackground() {
   $('shippingOverlay').classList.add('hidden')
   state.isBuildMinimized = true
-  if (state.isBuildRunning || state.activeRunIds.length > 0) {
-    $('minimizedBuildBar').classList.remove('hidden')
-    $('topBuildPill').classList.remove('hidden')
-  }
+  if (builds.size) $('minimizedBuildBar').classList.remove('hidden')
+  paintBuilds()
 }
 
 function restoreBuildFromBackground() {
-  state.isBuildMinimized = false
-  $('shippingOverlay').classList.remove('hidden')
-  $('minimizedBuildBar').classList.add('hidden')
+  openBuildOverlay()
 }
+
+// Kapat: biten build'i listeden çıkarır; başka build varsa ona geçer, yoksa her şeyi gizler
+function closeFinishedBuild() {
+  const b = focusedBuild()
+  if (b && !b.running) removeBuild(b)
+  if (!builds.size) {
+    $('shippingOverlay').classList.add('hidden')
+    $('minimizedBuildBar').classList.add('hidden')
+    state.isBuildMinimized = false
+  }
+  _lastTabsHtml = null
+  paintBuilds()
+}
+
+window.shipperAPI.onShipEvent((ev) => {
+  const b = (ev.buildId && builds.get(ev.buildId)) || null
+  if (!b || !b.running) return
+  b.status = ev.message
+  if (b.id === focusedBuildId) paintBuilds()
+})
+
+;['buildTabs', 'minBuildTabs'].forEach((id) => {
+  $(id)?.addEventListener('click', (e) => {
+    const closer = e.target.closest('[data-close-build]')
+    if (closer) {
+      e.stopPropagation()
+      const target = builds.get(closer.dataset.closeBuild)
+      if (target && !target.running) {
+        removeBuild(target)
+        _lastTabsHtml = null
+        if (!builds.size) {
+          $('shippingOverlay').classList.add('hidden')
+          $('minimizedBuildBar').classList.add('hidden')
+          state.isBuildMinimized = false
+        }
+        paintBuilds()
+      }
+      return
+    }
+    const tab = e.target.closest('[data-build]')
+    if (tab) focusBuild(tab.dataset.build)
+  })
+})
 
 $('btnMinimizeBuildTop')?.addEventListener('click', minimizeBuildToBackground)
 $('btnHideOverlay').addEventListener('click', () => {
-  if (state.isBuildRunning) {
+  const b = focusedBuild()
+  if (b?.running) {
     minimizeBuildToBackground()
     showToast('Derleme arka plana alındı. Sağ alttan takip edebilirsiniz.', 'info')
   } else {
-    $('shippingOverlay').classList.add('hidden')
-    $('minimizedBuildBar').classList.add('hidden')
-    $('topBuildPill').classList.add('hidden')
+    closeFinishedBuild()
   }
 })
 
 $('shippingOverlay').addEventListener('click', (e) => {
   if (e.target === $('shippingOverlay')) {
-    if (state.isBuildRunning) minimizeBuildToBackground()
+    if (runningBuilds().length) minimizeBuildToBackground()
     else $('shippingOverlay').classList.add('hidden')
   }
 })
@@ -1015,51 +1218,52 @@ $('btnRestoreBuildModal')?.addEventListener('click', restoreBuildFromBackground)
 $('topBuildPill')?.addEventListener('click', restoreBuildFromBackground)
 $('btnDismissMinBar')?.addEventListener('click', () => {
   $('minimizedBuildBar').classList.add('hidden')
-  if (!state.isBuildRunning) $('topBuildPill').classList.add('hidden')
 })
 
 function setCancelButtonsVisible(visible) {
   $('btnCancelBuild')?.classList.toggle('hidden', !visible)
   $('btnCancelMinBar')?.classList.toggle('hidden', !visible)
-  if ($('btnCancelBuild')) {
+  if ($('btnCancelBuild') && !$('btnCancelBuild').dataset.cancelling) {
     $('btnCancelBuild').disabled = false
     $('btnCancelBuild').innerHTML = `
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
       <span>Derlemeyi Durdur</span>
     `
   }
-  if ($('btnCancelMinBar')) {
+  if ($('btnCancelMinBar') && !$('btnCancelBuild')?.dataset.cancelling) {
     $('btnCancelMinBar').disabled = false
     $('btnCancelMinBar').textContent = 'Durdur'
   }
 }
 
 async function cancelActiveBuild() {
-  if (!state.activeRunIds || !state.activeRunIds.length) return
-  if ($('btnCancelBuild')) {
-    $('btnCancelBuild').disabled = true
-    $('btnCancelBuild').textContent = 'Durduruluyor...'
+  const b = focusedBuild()
+  if (!b || !b.running) return
+  if (!b.runIds.length) {
+    return showToast('Bu build henüz buluta gönderilmedi (yerel hazırlık sürüyor); başladıktan sonra durdurulabilir.', 'info')
   }
+  const btn = $('btnCancelBuild')
+  btn.dataset.cancelling = '1'
+  btn.disabled = true
+  btn.textContent = 'Durduruluyor...'
   if ($('btnCancelMinBar')) {
     $('btnCancelMinBar').disabled = true
     $('btnCancelMinBar').textContent = '...'
   }
   try {
-    await window.shipperAPI.cancelRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
-    state.isBuildRunning = false
-    if (state.pollTimer) clearInterval(state.pollTimer)
-    if (state.elapsedTimer) clearInterval(state.elapsedTimer)
-    window.shipperAPI.setProgress(-1)
-    setCancelButtonsVisible(false)
-    $('btnHideOverlayText').textContent = 'Kapat'
-    $('orbitalLoader').classList.add('failed')
-    $('minBarSpinner').classList.add('failed')
-    $('shipPhaseTag').textContent = 'İPTAL EDİLDİ'
-    updateProgressUI(100, 'Derleme kullanıcı tarafından durduruldu.')
+    await window.shipperAPI.cancelRun({ runIds: b.runIds, runId: b.runIds[0] })
+    b.running = false
+    b.elapsed = Math.floor((Date.now() - b.startTime) / 1000)
+    if (b.pollTimer) clearInterval(b.pollTimer)
+    b.loader = 'failed'
+    b.phase = 'İPTAL EDİLDİ'
+    setBuildProgress(b, 100, 'Derleme kullanıcı tarafından durduruldu.')
     showToast('Derleme durduruldu', 'info')
   } catch (e) {
     showToast(`Durdurulamadı: ${e.message}`, 'error')
-    setCancelButtonsVisible(true)
+  } finally {
+    delete btn.dataset.cancelling
+    paintBuilds()
   }
 }
 
@@ -1069,99 +1273,8 @@ $('btnCancelMinBar')?.addEventListener('click', (e) => {
   cancelActiveBuild()
 })
 
-function openLoadingOverlay(platforms) {
-  state.isBuildRunning = true
-  state.isBuildMinimized = false
-  state.activePlatforms = platforms
-  $('shippingOverlay').classList.remove('hidden')
-  $('minimizedBuildBar').classList.add('hidden')
-  $('topBuildPill').classList.remove('hidden')
-  setCancelButtonsVisible(true)
-
-  const loader = $('orbitalLoader')
-  loader.className = 'spinner-lg'
-  $('minBarSpinner').className = 'spinner-sm'
-  $('btnResumeShip').classList.add('hidden')
-  $('failedLogBox').classList.add('hidden')
-  $('liveJobsContainer').innerHTML = skeletonRows(2)
-  delete $('liveJobsContainer').dataset.lastHtml
-  $('btnHideOverlayText').textContent = 'Arka Planda Devam Et'
-
-  const curProj = state.projects.find((p) => p.id === state.activeProjectId)
-  const projPrefix = curProj ? `${curProj.name} · ` : ''
-
-  let title = `${projPrefix}App Store & Google Play`
-  if (platforms === 'ios') title = `${projPrefix}iOS → TestFlight`
-  else if (platforms === 'android') title = `${projPrefix}Android → Google Play`
-
-  $('shipModalTitle').textContent = title
-  $('minBarTitle').textContent = title
-
-  $('shipPhaseTag').textContent = 'BAŞLATILIYOR'
-  $('shipModalSubtitle').textContent = 'Proje senkronize ediliyor ve bulut derleme sunucusu başlatılıyor...'
-  $('overallStatusLabel').textContent = 'Bağlanıyor...'
-  $('minBarStatus').textContent = 'Bağlanıyor...'
-  updateProgressUI(5)
-
-  state.startTime = Date.now()
-  if (state.elapsedTimer) clearInterval(state.elapsedTimer)
-  state.elapsedTimer = setInterval(() => {
-    const sec = Math.floor((Date.now() - state.startTime) / 1000)
-    const formatted = formatSec(sec)
-    $('shipElapsedTimer').textContent = formatted
-    $('minBarTimer').textContent = formatted
-  }, 1000)
-}
-
-let _lastProgressSent = null
-function updateProgressUI(pct, statusLabel) {
-  const safePct = Math.max(5, Math.min(100, Math.round(pct)))
-  $('overallPctLabel').textContent = `${pct}%`
-  $('overallProgressBar').style.width = `${safePct}%`
-  $('minBarPct').textContent = `${pct}%`
-  $('minBarProgressFill').style.width = `${safePct}%`
-  $('topPillText').textContent = state.isBuildRunning ? `Derleniyor · ${pct}%` : (pct === 100 ? 'Tamamlandı' : 'Durdu')
-  if (statusLabel) {
-    $('overallStatusLabel').textContent = statusLabel
-    $('minBarStatus').textContent = statusLabel
-  }
-  const sent = state.isBuildRunning ? safePct / 100 : -1
-  if (sent !== _lastProgressSent) {
-    _lastProgressSent = sent
-    window.shipperAPI.setProgress(sent)
-  }
-}
-
-function renderLiveJobs(runData) {
-  // Atlanan (skipped) platform işlerini kesinlikle gizle (örn: sadece iOS seçildiğinde Android -> Google Play)
-  const rawJobs = (runData.jobs || []).filter((j) => j.conclusion !== 'skipped')
-  const container = $('liveJobsContainer')
-
-  const mainJobs = rawJobs.filter((j) => j.name !== 'detect')
-  // Ana platform işleri başladıysa "detect" ön kontrol kartını gizle ki ekran sade kalsın
-  const jobs = mainJobs.length > 0 ? mainJobs : rawJobs
-
-  let overallPct = 10
-  let maxRemaining = 0
-  if (mainJobs.length > 0) {
-    overallPct = Math.round(mainJobs.reduce((acc, j) => acc + (j.pct || 0), 0) / mainJobs.length)
-    maxRemaining = Math.max(0, ...mainJobs.filter((j) => j.status !== 'completed').map((j) => j.remaining || 0))
-  } else if (rawJobs.some((j) => j.name === 'detect' && j.status === 'completed')) {
-    overallPct = 15
-  }
-
-  if (runData.status === 'completed') overallPct = 100
-
-  let statusText = ''
-  if (runData.status !== 'completed') {
-    $('shipPhaseTag').textContent = 'DERLENİYOR'
-    statusText = maxRemaining > 0
-      ? `Derleniyor · Tahmini kalan: ~${formatSec(maxRemaining)}`
-      : 'Adımlar yürütülüyor...'
-  }
-  updateProgressUI(overallPct, statusText)
-
-  const html = jobs.map((j) => {
+function jobsHtmlFor(jobs) {
+  return jobs.map((j) => {
     let jStatus = 'Sırada'
     if (j.status === 'in_progress') jStatus = `${j.pct}%`
     else if (j.status === 'completed') {
@@ -1203,14 +1316,101 @@ function renderLiveJobs(runData) {
       </div>
     `
   }).join('')
-  // Skip the DOM rewrite when nothing changed since the last poll
-  if (container.dataset.lastHtml !== html) {
-    container.dataset.lastHtml = html
-    container.innerHTML = html
-  }
 }
 
-async function startShipping(platforms) {
+// Bir yoklama sonucunu build nesnesine işler (çizim paintBuilds'te)
+function applyRunData(b, runData) {
+  // Atlanan (skipped) platform işlerini gizle (örn: sadece iOS seçildiğinde Android -> Google Play)
+  const rawJobs = (runData.jobs || []).filter((j) => j.conclusion !== 'skipped')
+  const mainJobs = rawJobs.filter((j) => j.name !== 'detect')
+  // Ana platform işleri başladıysa "detect" ön kontrol kartını gizle ki ekran sade kalsın
+  const jobs = mainJobs.length > 0 ? mainJobs : rawJobs
+
+  let overallPct = 10
+  let maxRemaining = 0
+  if (mainJobs.length > 0) {
+    overallPct = Math.round(mainJobs.reduce((acc, j) => acc + (j.pct || 0), 0) / mainJobs.length)
+    maxRemaining = Math.max(0, ...mainJobs.filter((j) => j.status !== 'completed').map((j) => j.remaining || 0))
+  } else if (rawJobs.some((j) => j.name === 'detect' && j.status === 'completed')) {
+    overallPct = 15
+  }
+  if (runData.status === 'completed') overallPct = 100
+
+  let statusText = ''
+  if (runData.status !== 'completed') {
+    b.phase = 'DERLENİYOR'
+    statusText = maxRemaining > 0
+      ? `Derleniyor · Tahmini kalan: ~${formatSec(maxRemaining)}`
+      : 'Adımlar yürütülüyor...'
+  }
+  setBuildProgress(b, overallPct, statusText)
+  b.jobsHtml = jobsHtmlFor(jobs)
+}
+
+async function finishBuild(b, runData) {
+  b.running = false
+  b.elapsed = Math.floor((Date.now() - b.startTime) / 1000)
+  if (b.pollTimer) clearInterval(b.pollTimer)
+  if (runData.conclusion === 'success') {
+    b.loader = 'completed'
+    b.phase = 'TAMAMLANDI'
+    setBuildProgress(b, 100, 'Mağaza yüklemeleri başarıyla tamamlandı!')
+    showToast(`${b.title} mağazaya gönderildi!`, 'success')
+    window.shipperAPI.notify({
+      title: 'App Shipper — Gönderim Tamamlandı',
+      body: `${b.title} başarıyla mağazaya yüklendi.`,
+    })
+    refreshStoreStatus()
+  } else if (runData.conclusion === 'cancelled') {
+    b.loader = 'failed'
+    b.phase = 'İPTAL EDİLDİ'
+    setBuildProgress(b, 100, 'Derleme kullanıcı tarafından durduruldu.')
+  } else {
+    b.loader = 'failed'
+    b.phase = 'HATA'
+    b.canResume = true
+    setBuildProgress(b, 100, 'Derleme sırasında hata oluştu — detayları inceleyin.')
+    window.shipperAPI.notify({
+      title: 'App Shipper — Derleme Hatası',
+      body: `${b.title} sırasında bir hata oluştu.`,
+    })
+    try {
+      const logs = await window.shipperAPI.getFailedLogs({ runId: b.runIds[0] })
+      if (logs) b.failedLog = logs.slice(-4500)
+    } catch { /* ignore */ }
+  }
+  paintBuilds()
+}
+
+function startBuildPolling(b) {
+  const pollFn = async () => {
+    if (!builds.has(b.id) || !b.running) return
+    let runData
+    try {
+      runData = await window.shipperAPI.pollRun({ runIds: b.runIds, runId: b.runIds[0] })
+    } catch { return }
+    if (!builds.has(b.id) || !b.running) return
+    applyRunData(b, runData)
+    if (runData.status === 'completed') await finishBuild(b, runData)
+    else paintBuilds()
+  }
+  if (b.pollTimer) clearInterval(b.pollTimer)
+  b.pollTimer = startGuardedPoll(pollFn, 3000)
+  return pollFn()
+}
+
+function failBuild(b, e) {
+  b.running = false
+  b.elapsed = Math.floor((Date.now() - b.startTime) / 1000)
+  if (b.pollTimer) clearInterval(b.pollTimer)
+  b.loader = 'failed'
+  b.phase = 'HATA'
+  setBuildProgress(b, 100, friendlyError(e))
+  paintBuilds()
+  showToast(`${b.title}: ${friendlyError(e)}`, 'error')
+}
+
+async function startShipping(platforms, opts = {}) {
   const iosPath = $('wsIosPath').value.trim()
   const androidPath = $('wsAndroidPath').value.trim()
 
@@ -1221,6 +1421,19 @@ async function startShipping(platforms) {
     return showToast('Android klasörü seçilmemiş', 'error')
   }
 
+  const curProj = state.projects.find((p) => p.id === state.activeProjectId)
+
+  // Paralel sınırlar: en fazla 3 build; aynı proje + aynı platform ikinci kez başlamaz (bulutta birbirini iptal eder)
+  const active = runningBuilds().filter((x) => x.id !== opts.replaceId)
+  if (active.length >= MAX_PARALLEL_BUILDS) {
+    return showToast(`En fazla ${MAX_PARALLEL_BUILDS} build aynı anda çalışabilir. Birinin bitmesini bekleyin.`, 'error')
+  }
+  const want = new Set(platformSet(platforms))
+  const clash = active.find((x) => x.projectId === (curProj?.id || '') && platformSet(x.platforms).some((p) => want.has(p)))
+  if (clash) {
+    return showToast(`${curProj?.name || 'Bu proje'} için ${platformLabel(clash.platforms)} build'i zaten çalışıyor.`, 'error')
+  }
+
   if (state.shipStarting) return
   state.shipStarting = true
   const shipBtns = ['btnShipApple', 'btnShipGoogle', 'btnShipBoth'].map($)
@@ -1228,13 +1441,17 @@ async function startShipping(platforms) {
   try {
     await saveActiveWorkspaceProject()
   } catch (e) {
+    return showToast(friendlyError(e), 'error')
+  } finally {
+    // Yalnızca kaydetme sürerken kilit: ardından başka bir projenin build'i de başlatılabilir
     state.shipStarting = false
     shipBtns.forEach((b) => setBusy(b, false))
-    return showToast(friendlyError(e), 'error')
   }
-  openLoadingOverlay(platforms)
 
-  const curProj = state.projects.find((p) => p.id === state.activeProjectId)
+  if (opts.replaceId && builds.has(opts.replaceId)) removeBuild(builds.get(opts.replaceId))
+  const b = createBuild(platforms, curProj)
+  openBuildOverlay(b.id)
+
   const rawVerInput = $('inpVersion').value.trim()
   const rawBuildInput = $('inpBuildNumber').value.trim()
 
@@ -1246,99 +1463,32 @@ async function startShipping(platforms) {
   }
 
   try {
-    const resumeRun = state.resumeNext
-    state.resumeNext = false
-    const res = resumeRun ? await window.shipperAPI.resumeShip() : await window.shipperAPI.startShip({
-      projectId: curProj?.id || '',
-      projectName: curProj?.name || '',
-      iosPath,
-      androidPath,
-      platforms,
-      version: versionPayload,
-      ref: $('inpRef').value.trim(),
-      androidTrack: $('selAndroidTrack').value,
-      isDraft: $('selAndroidDraft').value === 'draft',
-      appleProfile: $('selAppleProfile').value,
-      googleProfile: $('selGoogleProfile').value,
-      autoSyncGit: $('chkAutoSyncGit').checked,
-    })
+    const res = opts.resume
+      ? await window.shipperAPI.resumeShip({ buildId: b.id, projectId: curProj?.id || '' })
+      : await window.shipperAPI.startShip({
+        buildId: b.id,
+        slot: b.slot,
+        projectId: curProj?.id || '',
+        projectName: curProj?.name || '',
+        iosPath,
+        androidPath,
+        platforms,
+        version: versionPayload,
+        ref: $('inpRef').value.trim(),
+        androidTrack: $('selAndroidTrack').value,
+        isDraft: $('selAndroidDraft').value === 'draft',
+        appleProfile: $('selAppleProfile').value,
+        googleProfile: $('selGoogleProfile').value,
+        autoSyncGit: $('chkAutoSyncGit').checked,
+      })
 
-    state.activeRunIds = res.runIds || [res.runId]
-    state.activeRunUrl = res.runUrl
-    $('shipModalSubtitle').textContent = `${res.repo} derlemesi canlı takip ediliyor.`
-
-    if (state.pollTimer) clearInterval(state.pollTimer)
-
-    const pollFn = async () => {
-      try {
-        const runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
-        renderLiveJobs(runData)
-
-        if (runData.status === 'completed') {
-          state.isBuildRunning = false
-          clearInterval(state.pollTimer)
-          clearInterval(state.elapsedTimer)
-          window.shipperAPI.setProgress(-1)
-          setCancelButtonsVisible(false)
-          $('btnHideOverlayText').textContent = 'Kapat'
-
-          const loader = $('orbitalLoader')
-          const minSpinner = $('minBarSpinner')
-
-          if (runData.conclusion === 'success') {
-            loader.classList.add('completed')
-            minSpinner.classList.add('completed')
-            $('shipPhaseTag').textContent = 'TAMAMLANDI'
-            updateProgressUI(100, 'Mağaza yüklemeleri başarıyla tamamlandı!')
-            showToast('Uygulama mağazalara başarıyla gönderildi!', 'success')
-            window.shipperAPI.notify({
-              title: 'App Shipper — Gönderim Tamamlandı',
-              body: `${$('minBarTitle').textContent} başarıyla mağazaya yüklendi.`,
-            })
-            refreshStoreStatus()
-          } else if (runData.conclusion === 'cancelled') {
-            loader.classList.add('failed')
-            minSpinner.classList.add('failed')
-            $('shipPhaseTag').textContent = 'İPTAL EDİLDİ'
-            updateProgressUI(100, 'Derleme kullanıcı tarafından durduruldu.')
-          } else {
-            loader.classList.add('failed')
-            minSpinner.classList.add('failed')
-            $('shipPhaseTag').textContent = 'HATA'
-            updateProgressUI(100, 'Derleme sırasında hata oluştu — detayları inceleyin.')
-            $('btnResumeShip').classList.remove('hidden')
-            window.shipperAPI.notify({
-              title: 'App Shipper — Derleme Hatası',
-              body: `${$('minBarTitle').textContent} sırasında bir hata oluştu.`,
-            })
-            const logs = await window.shipperAPI.getFailedLogs({ runId: state.activeRunIds[0] })
-            if (logs) {
-              $('failedLogBox').classList.remove('hidden')
-              $('failedLogPre').textContent = logs.slice(-4500)
-            }
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    state.shipStarting = false
-    shipBtns.forEach((b) => setBusy(b, false))
-    await pollFn()
-    state.pollTimer = startGuardedPoll(pollFn, 3000)
+    if (!builds.has(b.id)) return
+    b.runIds = res.runIds || [res.runId]
+    b.runUrl = res.runUrl
+    b.subtitle = `${res.repo} derlemesi canlı takip ediliyor.`
+    await startBuildPolling(b)
   } catch (e) {
-    state.isBuildRunning = false
-    clearInterval(state.elapsedTimer)
-    window.shipperAPI.setProgress(-1)
-    setCancelButtonsVisible(false)
-    $('btnHideOverlayText').textContent = 'Kapat'
-    $('orbitalLoader').classList.add('failed')
-    $('minBarSpinner').classList.add('failed')
-    $('shipPhaseTag').textContent = 'HATA'
-    updateProgressUI(100, friendlyError(e))
-    showToast(friendlyError(e), 'error')
-  } finally {
-    state.shipStarting = false
-    shipBtns.forEach((b) => setBusy(b, false))
+    if (builds.has(b.id)) failBuild(b, e)
   }
 }
 
@@ -1347,13 +1497,16 @@ $('btnShipGoogle').addEventListener('click', () => startShipping('android'))
 $('btnShipBoth').addEventListener('click', () => startShipping('both'))
 
 $('btnResumeShip').addEventListener('click', () => {
-  if (state.shipStarting) return
-  state.resumeNext = true
-  startShipping('ios')
+  const b = focusedBuild()
+  if (!b || b.running) return
+  // Devam yalnızca o build'in ait olduğu projede çalışır (yüklenen paket proje başına saklanır)
+  if (b.projectId !== state.activeProjectId) return showToast(`Önce "${b.projectName}" projesini seçin, sonra devam edin.`, 'error')
+  startShipping('ios', { resume: true, replaceId: b.id })
 })
 
 $('btnOpenRunUrl').addEventListener('click', () => {
-  if (state.activeRunUrl) window.shipperAPI.openExternal(state.activeRunUrl)
+  const b = focusedBuild()
+  if (b?.runUrl) window.shipperAPI.openExternal(b.runUrl)
 })
 
 // Geçmiş (Filtreleme, Sıralama ve Sayfalama)
@@ -1530,24 +1683,15 @@ function renderHistoryTable() {
 
   container.querySelectorAll('[data-watch-run]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      state.activeRunIds = [btn.dataset.watchRun]
-      state.activeRunUrl = btn.dataset.watchUrl
-      openLoadingOverlay(btn.dataset.watchPlat || 'both')
-      if (state.pollTimer) clearInterval(state.pollTimer)
-      state.pollTimer = startGuardedPoll(async () => {
-        let runData
-        try {
-          runData = await window.shipperAPI.pollRun({ runIds: state.activeRunIds, runId: state.activeRunIds[0] })
-        } catch { return }
-        renderLiveJobs(runData)
-        if (runData.status === 'completed') {
-          state.isBuildRunning = false
-          clearInterval(state.pollTimer)
-          clearInterval(state.elapsedTimer)
-          window.shipperAPI.setProgress(-1)
-          setCancelButtonsVisible(false)
-        }
-      }, 3000)
+      const runId = btn.dataset.watchRun
+      const existing = [...builds.values()].find((x) => x.runIds.map(String).includes(String(runId)))
+      if (existing) return openBuildOverlay(existing.id)
+      if (runningBuilds().length >= MAX_PARALLEL_BUILDS) return showToast(`En fazla ${MAX_PARALLEL_BUILDS} build aynı anda izlenebilir.`, 'error')
+      const b = createBuild(btn.dataset.watchPlat || 'both', state.projects.find((p) => p.id === state.activeProjectId), [runId])
+      b.runUrl = btn.dataset.watchUrl
+      b.subtitle = 'Çalışan derleme canlı takip ediliyor.'
+      openBuildOverlay(b.id)
+      startBuildPolling(b)
     })
   })
 }

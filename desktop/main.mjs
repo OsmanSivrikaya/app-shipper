@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -73,24 +74,62 @@ ipcMain.handle('window:close', () => mainWindow?.close())
 
 // ─────────────────────── Yardımcılar & Config ───────────────────────
 
+const CONFIG_BAK_PATH = CONFIG_PATH + '.bak'
+// Okuma hatasında (bozuk/yarım dosya) boş config'in diske yazılmasını engeller.
+let _configUnreadable = false
+
+function normalizeConfig(cfg) {
+  cfg.appleProfiles ??= []
+  cfg.googleProfiles ??= []
+  cfg.projects ??= []
+  cfg.lang ??= 'tr'
+  cfg.soundEnabled ??= true
+  return cfg
+}
+
+function readConfigFile(p) {
+  return JSON.parse(fs.readFileSync(p, 'utf8'))
+}
+
 function loadConfig() {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
-      cfg.appleProfiles ??= []
-      cfg.googleProfiles ??= []
-      cfg.projects ??= []
-      cfg.lang ??= 'tr'
-      cfg.soundEnabled ??= true
+  if (fs.existsSync(CONFIG_PATH)) {
+    try {
+      const cfg = normalizeConfig(readConfigFile(CONFIG_PATH))
+      _configUnreadable = false
       return cfg
+    } catch {
+      // Ana dosya bozuk: yedekten dene
+      try {
+        const cfg = normalizeConfig(readConfigFile(CONFIG_BAK_PATH))
+        _configUnreadable = false
+        return cfg
+      } catch { /* yedek de yok */ }
+      _configUnreadable = true
     }
-  } catch { /* ignore */ }
-  return { appleProfiles: [], googleProfiles: [], projects: [], lang: 'tr', soundEnabled: true }
+  }
+  return normalizeConfig({})
 }
 
 function saveConfig(cfg) {
+  if (_configUnreadable) {
+    console.error('[config] config.json okunamadı; üzerine yazılmıyor (veri kaybını önlemek için).')
+    return
+  }
   fs.mkdirSync(HOME_DIR, { recursive: true })
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
+  const data = JSON.stringify(cfg, null, 2)
+  const tmp = CONFIG_PATH + '.tmp'
+  // Mevcut dosya geçerliyse ve içinde veri varsa yedekle
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const cur = readConfigFile(CONFIG_PATH)
+      if ((cur.projects?.length || 0) + (cur.appleProfiles?.length || 0) + (cur.googleProfiles?.length || 0) > 0) {
+        fs.copyFileSync(CONFIG_PATH, CONFIG_BAK_PATH)
+      }
+    }
+  } catch { /* mevcut dosya bozuksa yedeğe dokunma */ }
+  // Atomik yazım: önce geçici dosya, sonra yeniden adlandır
+  fs.writeFileSync(tmp, data)
+  fs.renameSync(tmp, CONFIG_PATH)
 }
 
 function loadHistory() {
@@ -998,6 +1037,62 @@ ipcMain.handle('projects:delete', async (_e, id) => {
 
 // ─────────────────────── Klasör & Dosya Seçiciler ───────────────────────
 
+// ─────────────────────── Yapılandırma Dışa / İçe Aktarma ───────────────────────
+// GitHub oturum token'ı (cfg.token) bilinçli olarak dışa aktarılmaz ve içe aktarılmaz.
+const CONFIG_EXPORT_KEYS = ['projects', 'appleProfiles', 'googleProfiles', 'lang', 'soundEnabled', 'shipperRepo']
+
+ipcMain.handle('config:export', async () => {
+  const res = await dialog.showSaveDialog(mainWindow, {
+    title: 'Yapılandırmayı Dışa Aktar',
+    defaultPath: 'app-shipper-config.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (res.canceled || !res.filePath) return null
+  const cfg = loadConfig()
+  const out = { appShipperConfig: 1, exportedAt: new Date().toISOString() }
+  for (const k of CONFIG_EXPORT_KEYS) if (cfg[k] !== undefined) out[k] = cfg[k]
+  fs.writeFileSync(res.filePath, JSON.stringify(out, null, 2))
+  return {
+    path: res.filePath,
+    projects: out.projects?.length || 0,
+    apple: out.appleProfiles?.length || 0,
+    google: out.googleProfiles?.length || 0,
+  }
+})
+
+ipcMain.handle('config:import', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Yapılandırmayı İçe Aktar',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  })
+  if (res.canceled || !res.filePaths[0]) return null
+  let inc
+  try {
+    inc = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8'))
+  } catch {
+    throw new Error('Dosya okunamadı veya geçerli bir JSON değil.')
+  }
+  if (!inc || inc.appShipperConfig !== 1) {
+    throw new Error('Bu dosya bir App Shipper yapılandırma dışa aktarımı değil.')
+  }
+  const mergeById = (cur = [], add = []) => {
+    const ids = new Set(add.map((x) => x.id))
+    return [...add, ...cur.filter((x) => !ids.has(x.id))]
+  }
+  const cfg = loadConfig()
+  cfg.projects = mergeById(cfg.projects, Array.isArray(inc.projects) ? inc.projects : [])
+  cfg.appleProfiles = mergeById(cfg.appleProfiles, Array.isArray(inc.appleProfiles) ? inc.appleProfiles : [])
+  cfg.googleProfiles = mergeById(cfg.googleProfiles, Array.isArray(inc.googleProfiles) ? inc.googleProfiles : [])
+  if (!cfg.shipperRepo && typeof inc.shipperRepo === 'string') cfg.shipperRepo = inc.shipperRepo
+  saveConfig(cfg)
+  return {
+    projects: (inc.projects || []).length,
+    apple: (inc.appleProfiles || []).length,
+    google: (inc.googleProfiles || []).length,
+  }
+})
+
 ipcMain.handle('dialog:selectFolder', async (_e, title) => {
   const res = await dialog.showOpenDialog(mainWindow, {
     title: title || 'Mobil Proje Klasörünü Seçin',
@@ -1160,7 +1255,10 @@ ipcMain.handle('accounts:saveApple', async (_e, payload) => {
   if (!shipper) throw new Error('Önce Merkezi Repo (app-shipper) bağlantısını kurun.')
 
   const label = (payload.label || 'Varsayılan Apple').trim()
-  const isDefault = Boolean(payload.isDefault)
+  // Varsayılan hesap '' son ekli secret'ları kullanır; zaten başka bir varsayılan varsa
+  // yeni hesap ayrı slug ile eklenir (üzerine yazmaz).
+  const existingDefault = (loadConfig().appleProfiles || []).find((p) => p.isDefault)
+  const isDefault = Boolean(payload.isDefault) && (!existingDefault || existingDefault.label === label)
   const slug = isDefault ? '' : slugOf(label)
   const suffix = slug ? `_${slug}` : ''
 
@@ -1213,7 +1311,8 @@ ipcMain.handle('accounts:saveGoogle', async (_e, payload) => {
   if (!shipper) throw new Error('Önce Merkezi Repo (app-shipper) bağlantısını kurun.')
 
   const label = (payload.label || 'Varsayılan Google Play').trim()
-  const isDefault = Boolean(payload.isDefault)
+  const existingDefault = (loadConfig().googleProfiles || []).find((p) => p.isDefault)
+  const isDefault = Boolean(payload.isDefault) && (!existingDefault || existingDefault.label === label)
   const slug = isDefault ? '' : slugOf(label)
   const suffix = slug ? `_${slug}` : ''
 
@@ -1313,9 +1412,12 @@ ipcMain.handle('project:uploadKeystore', async (_e, { repoOrName, jksPath, alias
 
 // ─────────────────────── Gönderim (Ship) & Senkronizasyon ───────────────────────
 
+// Paralel build'lerde olay hangi build'e ait? ship:start / ship:resume bağlamı async çağrı zinciri boyunca taşınır.
+const shipCtx = new AsyncLocalStorage()
+
 function sendShipEvent(data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('ship:event', data)
+    mainWindow.webContents.send('ship:event', { ...data, buildId: shipCtx.getStore()?.buildId || '' })
   }
 }
 
@@ -1353,14 +1455,14 @@ async function syncFolderToGitHub(folderPath, user, autoSyncGit) {
       }
     }
 
-    const status = await gitOut(folderPath, ['status', '--porcelain']).trim()
+    const status = (await gitOut(folderPath, ['status', '--porcelain'])).trim()
     if (status.length > 0) {
       sendShipEvent({ phase: 'sync', message: 'Son değişiklikler paketleniyor...' })
       await gitOut(folderPath, ['add', '-A'])
       await gitOut(folderPath, ['commit', '-m', 'chore: ship build sync'])
     }
 
-    const branch = await gitOut(folderPath, ['branch', '--show-current']).trim() || 'main'
+    const branch = (await gitOut(folderPath, ['branch', '--show-current'])).trim() || 'main'
     sendShipEvent({ phase: 'sync', message: `'${branch}' dalı buluta aktarılıyor...` })
     await gitOut(folderPath, ['push', '-u', 'origin', branch])
     targetRef = branch
@@ -1371,6 +1473,9 @@ async function syncFolderToGitHub(folderPath, user, autoSyncGit) {
 
 async function triggerWorkflowAndFindRun(shipper, fields) {
   const args = ['workflow', 'run', 'ship.yml', '-R', shipper]
+  // Aynı anda birden çok build tetiklenince "en yeni run" yanlış build'e ait olabilir: run-name'e giren benzersiz kimlikle eşleştir
+  const runTag = crypto.randomBytes(4).toString('hex')
+  fields = { ...fields, run_id: runTag }
   for (const [k, v] of Object.entries(fields)) {
     args.push('-f', `${k}=${v}`)
   }
@@ -1383,8 +1488,8 @@ async function triggerWorkflowAndFindRun(shipper, fields) {
   for (let i = 0; i < 40 && !run; i++) {
     await new Promise((r) => setTimeout(r, 1000))
     try {
-      const list = JSON.parse(await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '10', '--json', 'databaseId,createdAt,displayTitle,url,status']))
-      run = list.find((r) => r.createdAt >= before)
+      const list = JSON.parse(await ghAsync(['run', 'list', '-R', shipper, '-w', 'ship.yml', '-L', '30', '--json', 'databaseId,createdAt,displayTitle,url,status']))
+      run = list.find((r) => r.createdAt >= before && String(r.displayTitle || '').includes(`#${runTag}`))
     } catch { /* ignore */ }
   }
   return run
@@ -1456,10 +1561,17 @@ async function buildUnityXcode(projectDir) {
   try {
     await execFileAsync(editor, ['-batchmode', '-nographics', '-quit', '-projectPath', projectDir, '-logFile', log, '-executeMethod', method], {
       windowsHide: true, maxBuffer: 16 * 1024 * 1024,
+      // TestFlight test kanalı: oyunun release ön denetimi (Firebase/IAP/reklam/yer tutucu adres) build'i durdurmasın, uyarıya dönsün
+      env: { ...process.env, BS_ALLOW_UNSAFE_RELEASE: '1' },
     })
   } catch (e) {
     let tail = ''
-    try { tail = fs.readFileSync(log, 'utf8').split('\n').filter((l) => /error/i.test(l)).slice(-8).join('\n') } catch { /* ignore */ }
+    try {
+      // "LogAssemblyErrors" gibi gürültüyü ele; gerçek sebep "[Build]" ve "error CS" satırlarıdır
+      tail = fs.readFileSync(log, 'utf8').split('\n')
+        .filter((l) => /^\[Build\]|error CS|Exception/i.test(l) && !/LogAssemblyErrors/.test(l))
+        .slice(-8).join('\n')
+    } catch { /* ignore */ }
     throw new Error(`Unity build başarısız (log: ${log})\n${tail}`)
   }
   const out = path.join(projectDir, 'Builds', 'iOS')
@@ -1469,7 +1581,7 @@ async function buildUnityXcode(projectDir) {
 
 async function shipLocalBundle(folder, user, payload, shipper) {
   // Önceki hatalı koşudan kalan paket (devam etmek için saklanmıştı) artık gereksiz
-  const prev = loadConfig().lastBundle
+  const prev = (loadConfig().lastBundles || {})[payload.projectId || '_']
   if (prev?.tag) {
     try { await ghAsync(['release', 'delete', prev.tag, '-R', prev.repo, '--cleanup-tag', '-y']) } catch { /* zaten yok */ }
   }
@@ -1495,6 +1607,8 @@ async function shipLocalBundle(folder, user, payload, shipper) {
   sendShipEvent({ phase: 'sync', message: 'Paket şifreleniyor...' })
   const key = crypto.randomBytes(32)
   const iv = crypto.randomBytes(16)
+  // Her eşzamanlı build kendi yuvasındaki secret'ı kullanır (BUNDLE_KEY_1..3); tek ortak anahtar olsaydı bir build ötekinin anahtarını ezerdi
+  const keySlot = String(payload.slot || 1)
   const encrypted = `${archive}.enc`
   await new Promise((resolve, reject) => {
     const out = fs.createWriteStream(encrypted)
@@ -1506,7 +1620,7 @@ async function shipLocalBundle(folder, user, payload, shipper) {
     fs.createReadStream(archive).on('error', reject).pipe(cipher).pipe(out)
   })
   fs.rmSync(archive)
-  setSecret(shipper, 'BUNDLE_KEY', key.toString('hex'))
+  setSecret(shipper, `BUNDLE_KEY_${keySlot}`, key.toString('hex'))
   const mb = Math.round(fs.statSync(encrypted).size / 1048576)
   sendShipEvent({ phase: 'sync', message: `Buluta yükleniyor (${mb} MB)...` })
   try {
@@ -1521,10 +1635,12 @@ async function shipLocalBundle(folder, user, payload, shipper) {
     bundle_tag: tag,
     version: payload.version || '',
     apple_profile: payload.appleProfile || '',
+    key_slot: keySlot,
   })
   if (!run) throw new Error(`Derleme başlatıldı ancak takip ID'si alınamadı: https://github.com/${shipper}/actions`)
   const cfg = loadConfig()
-  cfg.lastBundle = { tag, repo, version: payload.version || '', appleProfile: payload.appleProfile || '', projectId: payload.projectId || '', projectName: payload.projectName || '' }
+  cfg.lastBundles = cfg.lastBundles || {}
+  cfg.lastBundles[payload.projectId || '_'] = { slot: keySlot, tag, repo, version: payload.version || '', appleProfile: payload.appleProfile || '', projectId: payload.projectId || '', projectName: payload.projectName || '' }
   saveConfig(cfg)
   recordRunMeta(run.databaseId, { projectId: payload.projectId || '', projectName: payload.projectName || '', repo, platforms: 'ios', version: payload.version || '' })
   return { runIds: [run.databaseId], runId: run.databaseId, runUrl: run.url, repo, shipper }
@@ -1532,16 +1648,17 @@ async function shipLocalBundle(folder, user, payload, shipper) {
 
 // Hata sonrası: yüklenmiş paketi yeniden kullanarak yalnızca bulut kısmını (imzala → derle → TestFlight) baştan çalıştırır.
 // Unity build + sıkıştırma + yükleme tekrarlanmaz.
-ipcMain.handle('ship:resume', async () => {
+ipcMain.handle('ship:resume', async (_e, payload = {}) => shipCtx.run({ buildId: payload.buildId || '' }, async () => {
   const shipper = getShipperRepo()
   if (!shipper) throw new Error('Merkezi app-shipper reposu bulunamadı.')
-  const last = loadConfig().lastBundle
+  const last = (loadConfig().lastBundles || {})[payload.projectId || '_']
   if (!last?.tag) throw new Error('Devam edilecek yüklenmiş bir paket yok. Baştan gönder.')
   try {
     await ghAsync(['release', 'view', last.tag, '-R', last.repo])
   } catch {
     throw new Error('Önceki paket artık yok (silinmiş). Baştan gönder.')
   }
+  await ensureShipperWorkflowSynced(shipper)
   sendShipEvent({ phase: 'trigger', message: 'Yüklenmiş paketle kaldığı yerden devam ediliyor...' })
   const run = await triggerWorkflowAndFindRun(shipper, {
     repo: last.repo,
@@ -1549,13 +1666,15 @@ ipcMain.handle('ship:resume', async () => {
     bundle_tag: last.tag,
     version: last.version,
     apple_profile: last.appleProfile,
+    // Yuva başka build'e geçtiyse anahtar ezilmiş olabilir; çalışma sırasında hata verirse baştan gönder
+    key_slot: last.slot || '',
   })
   if (!run) throw new Error(`Derleme başlatıldı ancak takip ID'si alınamadı: https://github.com/${shipper}/actions`)
   recordRunMeta(run.databaseId, { projectId: last.projectId, projectName: last.projectName, repo: last.repo, platforms: 'ios', version: last.version })
   return { runIds: [run.databaseId], runId: run.databaseId, runUrl: run.url, repo: last.repo, shipper }
-})
+}))
 
-ipcMain.handle('ship:start', async (_e, payload) => {
+ipcMain.handle('ship:start', (_e, payload) => shipCtx.run({ buildId: payload.buildId || '' }, async () => {
   // payload: { projectId, projectName, iosPath, androidPath, platforms, version, ref, appSubPath, androidTrack, isDraft, appleProfile, googleProfile, autoSyncGit }
   const shipper = getShipperRepo()
   if (!shipper) throw new Error('Merkezi app-shipper reposu bulunamadı. Lütfen Ayarlar sekmesinden kontrol edin.')
@@ -1680,7 +1799,7 @@ ipcMain.handle('ship:start', async (_e, payload) => {
     repo: synced.targetRepo,
     shipper,
   }
-})
+}))
 
 const DEFAULT_TOTAL = { Android: 190, iOS: 330 }
 const HIDDEN_STEP = /^(Set up job|Complete job|Post )/

@@ -1,5 +1,5 @@
 name: Ship
-run-name: "Ship ${{ inputs.repo }} [${{ inputs.platforms }}] ${{ inputs.version }}"
+run-name: "Ship ${{ inputs.repo }} [${{ inputs.platforms }}] ${{ inputs.version }} #${{ inputs.run_id }}"
 
 # Tetikleyenler: `ship <repo>` CLI'ı, Masaüstü Uygulaması veya proje reposundaki ship-on-tag.yml (v* tag push)
 on:
@@ -29,6 +29,14 @@ on:
         description: Görünen sürüm, ör. 1.2.0 (boş = projede yazan)
         type: string
         default: ""
+      run_id:
+        description: Masaüstünün çalışmayı bulması için benzersiz kimlik (run-name'e girer)
+        type: string
+        default: ""
+      key_slot:
+        description: Paket anahtarı yuvası (BUNDLE_KEY_<n>); eşzamanlı build'ler birbirinin anahtarını ezmesin
+        type: string
+        default: ""
       android_track:
         type: string
         default: internal
@@ -46,8 +54,9 @@ on:
         default: ""
 
 concurrency:
-  group: ship-${{ inputs.repo }}
-  cancel-in-progress: true
+  # run_id her tetiklemede benzersiz: eşzamanlı build'ler (iki Apple gönderimi dahil) birbirini asla iptal etmez
+  group: ship-${{ inputs.repo }}-${{ inputs.platforms }}-${{ inputs.run_id }}
+  cancel-in-progress: false
 
 jobs:
   detect:
@@ -307,7 +316,7 @@ jobs:
         if: inputs.bundle_tag != ''
         env:
           GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
-          BUNDLE_KEY: ${{ secrets.BUNDLE_KEY }}
+          BUNDLE_KEY: ${{ (inputs.key_slot != '' && secrets[format('BUNDLE_KEY_{0}', inputs.key_slot)]) || secrets.BUNDLE_KEY }}
         run: |
           mkdir -p "$RUNNER_TEMP/bundle" "$IOS_DIR"
           gh release download "${{ inputs.bundle_tag }}" -R "${{ inputs.repo }}" -D "$RUNNER_TEMP/bundle"

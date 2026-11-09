@@ -1,6 +1,6 @@
 {
   "name": "app-shipper",
-  "version": "1.1.0",
+  "version": "1.2.4",
   "private": true,
   "author": "Osman Sivrikaya <osman@appshipper.studio>",
   "description": "Tek tıkla herhangi bir mobil uygulamayı TestFlight + Google Play'e gönderir (Masaüstü Stüdyo + CLI)",

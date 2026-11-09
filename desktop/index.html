@@ -679,6 +679,16 @@
             </button>
           </form>
         </div>
+        <div class="panel-box mt-16" style="max-width:560px">
+          <div class="field">
+            <label>Yapılandırma Yedeği</label>
+            <p class="text-muted">Projelerini ve mağaza hesaplarını bir JSON dosyasına aktar ya da bir dosyadan geri yükle. GitHub oturum token'ı dosyaya yazılmaz.</p>
+          </div>
+          <div class="mt-12" style="display:flex;gap:8px">
+            <button type="button" class="btn" id="btnExportConfig">Dışa Aktar</button>
+            <button type="button" class="btn" id="btnImportConfig">İçe Aktar</button>
+          </div>
+        </div>
       </section>
 
     </main>
@@ -748,6 +758,7 @@
   <!-- YÜKLENİYOR EKRANI (Tam Detay Modalı) -->
   <div id="shippingOverlay" class="modal-backdrop hidden">
     <div class="modal-card modal-lg">
+      <div id="buildTabs" class="build-tabs hidden"></div>
       <div class="progress-header">
         <div class="spinner-lg" id="orbitalLoader"></div>
         <div class="progress-titles">
@@ -806,6 +817,7 @@
 
   <!-- ARKA PLANDA DEVAM EDEN DERLEME ÇUBUĞU (Floating Mini Progress) -->
   <div id="minimizedBuildBar" class="minimized-build-bar hidden">
+    <div id="minBuildTabs" class="build-tabs build-tabs-mini hidden"></div>
     <div class="min-bar-top">
       <div class="min-bar-left" id="minBarClickArea" title="Detayları büyütmek için tıklayın">
         <div class="spinner-sm" id="minBarSpinner"></div>

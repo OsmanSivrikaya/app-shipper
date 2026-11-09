@@ -1873,3 +1873,43 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeSpeed; }
 .err-body pre { font-size: 11px; white-space: pre-wrap; user-select: text; margin: 0 0 8px; color: #d1d5db; max-height: 180px; overflow: auto; }
 .err-actions { display: flex; gap: 8px; }
 .err-empty { font-size: 12.5px; color: var(--text-muted, #8b93a7); padding: 6px 2px; }
+
+/* Eşzamanlı build sekmeleri */
+.build-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.build-tabs-mini {
+  margin: 0;
+  padding: 8px 10px 0;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.build-tabs-mini::-webkit-scrollbar { display: none; height: 0; }
+.build-tabs-mini .build-tab { flex: 0 1 auto; min-width: 0; max-width: 150px; padding: 4px 8px; }
+.build-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 220px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+}
+.build-tab:hover { color: #e2e8f0; border-color: #475569; }
+.build-tab.active { background: rgba(37, 99, 235, 0.18); border-color: #3b82f6; color: #dbeafe; }
+.build-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.build-tab-pct { font-variant-numeric: tabular-nums; opacity: 0.85; }
+.build-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; flex: none; }
+.build-tab.running .build-tab-dot { background: #3b82f6; animation: buildTabPulse 1.2s ease-in-out infinite; }
+.build-tab.completed .build-tab-dot { background: #22c55e; }
+.build-tab.failed .build-tab-dot { background: #ef4444; }
+@keyframes buildTabPulse { 50% { opacity: 0.35; } }

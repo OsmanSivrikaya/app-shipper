@@ -27,13 +27,15 @@ contextBridge.exposeInMainWorld('shipperAPI', {
   saveGoogleAccount: (payload) => ipcRenderer.invoke('accounts:saveGoogle', payload),
   deleteGoogleAccount: (id) => ipcRenderer.invoke('accounts:deleteGoogle', id),
 
-  saveGeneralSettings: (payload) => ipcRenderer.invoke('settings:saveGeneral', payload),
+  exportConfig: () => ipcRenderer.invoke('config:export'),
+  importConfig: () => ipcRenderer.invoke('config:import'),
+  saveGeneralSettings:(payload) => ipcRenderer.invoke('settings:saveGeneral', payload),
 
   uploadEnv: (payload) => ipcRenderer.invoke('project:uploadEnv', payload),
   uploadKeystore: (payload) => ipcRenderer.invoke('project:uploadKeystore', payload),
 
   startShip: (payload) => ipcRenderer.invoke('ship:start', payload),
-  resumeShip: () => ipcRenderer.invoke('ship:resume'),
+  resumeShip: (payload) => ipcRenderer.invoke('ship:resume', payload),
   pollRun: (payload) => ipcRenderer.invoke('ship:pollRun', payload),
   cancelRun: (payload) => ipcRenderer.invoke('ship:cancelRun', payload),
   getFailedLogs: (payload) => ipcRenderer.invoke('ship:getFailedLogs', payload),
