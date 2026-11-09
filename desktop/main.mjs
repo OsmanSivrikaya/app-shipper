@@ -1051,6 +1051,18 @@ ipcMain.handle('config:export', async () => {
   const cfg = loadConfig()
   const out = { appShipperConfig: 1, exportedAt: new Date().toISOString() }
   for (const k of CONFIG_EXPORT_KEYS) if (cfg[k] !== undefined) out[k] = cfg[k]
+  // .p8 anahtarı dosyanın içine gömülür: başka makinede içe aktarınca ayrıca .p8 dosyası gerekmez.
+  // DİKKAT: dışa aktarılan dosya Apple özel anahtarını içerir; gizli tut.
+  out.appleProfiles = (out.appleProfiles || []).map((pr) => {
+    const candidates = [pr.p8Path, path.join(HOME_DIR, 'downloads', `AuthKey_${pr.keyId}.p8`)].filter(Boolean)
+    for (const f of candidates) {
+      try {
+        const txt = fs.readFileSync(f, 'utf8')
+        if (txt.includes('BEGIN PRIVATE KEY')) { const { p8Path: _drop, ...rest } = pr; return { ...rest, p8Content: txt } }
+      } catch { /* sıradaki aday */ }
+    }
+    return pr
+  })
   fs.writeFileSync(res.filePath, JSON.stringify(out, null, 2))
   return {
     path: res.filePath,
@@ -1081,8 +1093,30 @@ ipcMain.handle('config:import', async () => {
     return [...add, ...cur.filter((x) => !ids.has(x.id))]
   }
   const cfg = loadConfig()
-  cfg.projects = mergeById(cfg.projects, Array.isArray(inc.projects) ? inc.projects : [])
-  cfg.appleProfiles = mergeById(cfg.appleProfiles, Array.isArray(inc.appleProfiles) ? inc.appleProfiles : [])
+  // Gömülü .p8 varsa downloads klasörüne yaz ve profilin yolunu oraya çevir (dosya içeriği config'te tutulmaz)
+  const incApple = (Array.isArray(inc.appleProfiles) ? inc.appleProfiles : []).map((pr) => {
+    const { p8Content, ...rest } = pr
+    if (typeof p8Content === 'string' && p8Content.includes('BEGIN PRIVATE KEY') && pr.keyId) {
+      const dir = path.join(HOME_DIR, 'downloads')
+      fs.mkdirSync(dir, { recursive: true })
+      const dest = path.join(dir, `AuthKey_${pr.keyId}.p8`)
+      fs.writeFileSync(dest, p8Content)
+      rest.p8Path = dest
+    }
+    return rest
+  })
+  // Yollar makineye özeldir (Windows C:\... / macOS /Users/...): bu makinede yoksa boşalt, kullanıcı klasörü seçsin; eskisi ipucu olarak kalır
+  const exists = (v) => { try { return Boolean(v) && fs.existsSync(v) } catch { return false } }
+  const incProjects = (Array.isArray(inc.projects) ? inc.projects : []).map((pr) => {
+    const out = { ...pr }
+    for (const k of ['iosPath', 'androidPath']) {
+      if (out[k] && !exists(out[k])) { out[`${k}Hint`] = out[k]; out[k] = '' }
+    }
+    return out
+  })
+  for (const pr of incApple) if (pr.p8Path && !exists(pr.p8Path)) delete pr.p8Path
+  cfg.projects = mergeById(cfg.projects, incProjects)
+  cfg.appleProfiles = mergeById(cfg.appleProfiles, incApple)
   cfg.googleProfiles = mergeById(cfg.googleProfiles, Array.isArray(inc.googleProfiles) ? inc.googleProfiles : [])
   if (!cfg.shipperRepo && typeof inc.shipperRepo === 'string') cfg.shipperRepo = inc.shipperRepo
   saveConfig(cfg)
@@ -1556,10 +1590,11 @@ async function buildUnityXcode(projectDir) {
       fs.rmSync(path.join(projectDir, 'Temp', 'UnityLockfile'))
     } catch { throw new Error('Unity Editor bu projeyi açık tutuyor. Kapatıp tekrar dene.') }
   }
+  // -buildTarget iOS: iOS platform modülü açılışta yüklensin (batchmode'da yüklenmezse "build target was unsupported" hatası çıkar)
   const log = path.join(os.tmpdir(), `appshipper-unity-${Date.now()}.log`)
   sendShipEvent({ phase: 'sync', message: `Unity (${editor}) ile Xcode projesi üretiliyor (birkaç dakika sürer)...` })
   try {
-    await execFileAsync(editor, ['-batchmode', '-nographics', '-quit', '-projectPath', projectDir, '-logFile', log, '-executeMethod', method], {
+    await execFileAsync(editor, ['-batchmode', '-nographics', '-quit', '-buildTarget', 'iOS', '-projectPath', projectDir, '-logFile', log, '-executeMethod', method], {
       windowsHide: true, maxBuffer: 16 * 1024 * 1024,
       // TestFlight test kanalı: oyunun release ön denetimi (Firebase/IAP/reklam/yer tutucu adres) build'i durdurmasın, uyarıya dönsün
       env: { ...process.env, BS_ALLOW_UNSAFE_RELEASE: '1' },
